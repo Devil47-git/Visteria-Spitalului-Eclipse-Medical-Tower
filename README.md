@@ -1,38 +1,53 @@
-# Vistieria
+# Visteria Spital — Eclipse Medical Tower
 
-Aplicație web privată pentru evidența sumelor depuse și retrase. Autentificarea și verificarea contului se fac prin Discord OAuth; accesul este permis numai ID-urilor Discord înscrise în lista de acces sau configurate drept administratori. Administratorii gestionează lista din secțiunea „Gestionare acces” a aplicației. Local, datele sunt păstrate în fișierele `Acces.json` și `data/visterie.json`; pe Vercel, lista, registrul și sesiunile sunt păstrate în Neon Postgres. Numele și callsign-ul sunt salvate împreună cu fiecare tranzacție. Valorile monetare sunt stocate în bani întregi, iar interfața afișează lei (RON).
+Aplicație web privată pentru evidența sumelor depuse și retrase din visteria spitalului.
+Autentificare prin Discord OAuth. Datele sunt stocate în **Supabase (Postgres)**.
 
-> Aplicația ține un registru de evidență; nu transferă și nu procesează bani. Stocarea în JSON și sesiunile ținute în memoria serverului sunt potrivite pentru o singură instanță pe un singur server, nu pentru instanțe multiple sau utilizare financiară reglementată.
+## Funcționare pe scurt
+
+- **Coduri de acces**: directorii (004, 003, 002, 001) și șeful HR (007) generează din panou
+  un cod pentru un Discord ID. Persoana se conectează cu Discord, bagă codul, primește
+  whitelist și rămâne logată până când accesul îi e revoat (pe Discord ID sau cod).
+- **Bilanț** (total băgat, total scos, profit): vizibil doar pentru directori+ (004 și peste).
+- **Soldul** se poate ajusta manual din panoul de directori, înainte de lansare.
+- **Webhook Discord**: fiecare tranzacție trimite un embed verde/roșu într-un canal.
+
+## Configurare
+
+### 1. Baza de date — Supabase
+
+1. Creează un cont pe [supabase.com](https://supabase.com) → **New project**
+   (nume: `visteria-eclipse`, regiune: **Frankfurt / eu-central**).
+2. Copiază connection string-ul: Settings → Database → **Connection pooling → Transaction**
+   (port `6543`). E forma `postgresql://postgres.abc:[PAROLA]@aws-0-eu-central-1.pooler.supabase.com:6543/postgres`.
+
+### 2. Discord Developer Portal
+
+1. [discord.com/developers/applications](https://discord.com/developers/applications) → **New Application**.
+2. OAuth2 → Redirects: adaugă exact `https://[DOMENIUL-TĂU]/auth/discord/callback`.
+3. Copiază **Client ID** și **Client Secret**.
+
+### 3. Vercel
+
+Importă repo-ul, apoi Settings → Environment Variables:
+
+| Variabilă | De unde | Exemplu |
+|---|---|---|
+| `DATABASE_URL` | Supabase (connection pooling, pas 1) | `postgresql://postgres...:6543/postgres` |
+| `DISCORD_CLIENT_ID` | Discord Developer Portal | `1234567890123456789` |
+| `DISCORD_CLIENT_SECRET` | Discord Developer Portal | (secret) |
+| `DISCORD_REDIRECT_URI` | Îl scrii tu | `https://domeniul.vercel.app/auth/discord/callback` |
+| `DISCORD_ADMIN_IDS` | ID-ul tău Discord (și alți șefi, separate prin `,`) — au rang 007 automat | `111111111111111111` |
+| `DISCORD_WEBHOOK_URL` | Serverul Discord → canal → Edit → Integrations → Webhooks → Copy URL | `https://discord.com/api/webhooks/...` |
 
 ## Pornire locală
 
-Ai nevoie de Node.js 20.6 sau mai nou. Dependențele sunt instalate cu `npm install`.
+Ai nevoie de Node.js 20.6+. Copiază `.env.example` în `.env`, completează valorile, apoi:
 
-1. Copiază `.env.example` în `.env` și completează `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` și `DISCORD_ADMIN_IDS` cu ID-ul Discord al administratorului (mai mulți administratori se separă prin virgulă).
-2. În Discord Developer Portal, configurează URL-ul de redirect OAuth2 exact ca `DISCORD_REDIRECT_URI` (implicit `http://localhost:3000/auth/discord/callback`) și activează scope-ul `identify`.
-3. Rulează `npm start` și deschide `http://localhost:3000`.
-4. Conectează-te cu contul de administrator și deschide secțiunea „Gestionare acces”. Introdu ID-ul Discord (Developer Mode → clic dreapta pe utilizator → Copy User ID), numele și callsign-ul membrului.
+```bash
+npm install
+npm start        # http://localhost:3000
+npm test
+```
 
-Pentru utilizare publică, publică aplicația numai în spatele HTTPS și setează `NODE_ENV=production`; aceasta activează cookie-ul `Secure`. Păstrează `.env`, `Acces.json` și `data/visterie.json` în afara controlului versiunilor și limitează accesul la server și la copiile de siguranță. Repornește serverul după modificarea ID-urilor administratorilor din `.env`.
-
-## Publicare pe Vercel cu Neon
-
-Aplicația poate rula pe Vercel ca funcție serverless numai folosind o bază de date persistentă. Fișierul `vercel.json` direcționează rutele OAuth către funcția din `api/`, iar `DATABASE_URL` activează Neon pentru sold, tranzacții, accesul membrilor și sesiunile. Tabelele sunt create automat la prima cerere către API; tranzacțiile și sesiunile nu se bazează pe memoria temporară a funcției.
-
-1. Creează o bază de date Neon și copiază connection string-ul pooled pentru variabila `DATABASE_URL`.
-2. Importă repository-ul în Vercel și adaugă în Project Settings → Environment Variables `DATABASE_URL`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_ADMIN_IDS` și `DISCORD_REDIRECT_URI`.
-3. Setează `DISCORD_ADMIN_IDS` la ID-ul Discord al administratorului. Administratorul primește acces chiar dacă lista de membri este goală.
-4. Setează `DISCORD_REDIRECT_URI` la adresa publică Vercel urmată de `/auth/discord/callback`, de exemplu `https://numele-proiectului.vercel.app/auth/discord/callback`, și adaugă aceeași adresă la Discord Developer Portal → OAuth2 → Redirects.
-5. Redeployează proiectul după configurarea variabilelor și folosește domeniul Vercel redeployat.
-
-Nu publica `DATABASE_URL` în cod, în repository sau în conversații. Pe Vercel, dacă `DATABASE_URL` lipsește, API-ul returnează o eroare explicită în loc să raporteze succes folosind stocare temporară.
-
-## Publicare pe Render
-
-Poți folosi și serverul Node.js persistent de pe Render cu fișiere JSON și disc persistent. Blueprint-ul `render.yaml` configurează discul în `/var/data`; planul serviciului trebuie să permită discuri persistente.
-
-După crearea serviciului, completează variabilele `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_ADMIN_IDS` și `DISCORD_REDIRECT_URI` în setările Render. Valoarea pentru `DISCORD_REDIRECT_URI` trebuie să fie URL-ul serviciului urmat de `/auth/discord/callback`, de exemplu `https://numele-serviciului.onrender.com/auth/discord/callback`. Adaugă același URL în Discord Developer Portal, la OAuth2 Redirects. `Acces.json` și `visterie.json` se creează pe discul persistent la prima pornire; nu încărca fișierele de date locale în repository.
-
-## Teste
-
-Rulează `npm test` pentru testele de validare a sumelor și a datelor membrilor.
+Schema bazei de date se creează automat la primul request — nu rulezi nimic manual în Supabase.
