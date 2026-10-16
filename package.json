@@ -11,6 +11,6 @@
     "postgres": "^3.4.9"
   },
   "engines": {
-    "node": ">=20.6"
+    "node": "22.x"
   }
 }
