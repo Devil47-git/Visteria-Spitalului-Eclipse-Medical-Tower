@@ -1,21 +1,19 @@
 {
-  "functions": {
-    "api/[...path].mjs": {
-      "includeFiles": "public/**"
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/[...path].mjs",
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": "public/**"
+      }
     }
-  },
-  "rewrites": [
+  ],
+  "routes": [
     {
-      "source": "/auth/discord",
-      "destination": "/api/auth/discord"
-    },
-    {
-      "source": "/auth/discord/callback",
-      "destination": "/api/auth/discord/callback"
-    },
-    {
-      "source": "/((?!api/|auth/|.*\\.).*)",
-      "destination": "/index.html"
+      "src": "/(.*)",
+      "dest": "/api/[...path].mjs"
     }
   ]
 }
+
