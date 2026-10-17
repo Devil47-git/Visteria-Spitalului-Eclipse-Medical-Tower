@@ -71,9 +71,17 @@
         </form>
       </dialog>
 
-      <h2 class="section-title">Istoric tranzacții</h2>
-      <div id="history-list" class="history"></div>
-      <p id="empty-state" class="muted" hidden>Nicio tranzacție încă.</p>
+      <section class="history-panel" aria-labelledby="history-title">
+        <div class="history-heading">
+          <div>
+            <span class="eyebrow">REGISTRU FINANCIAR</span>
+            <h2 class="section-title" id="history-title">Istoric tranzacții</h2>
+          </div>
+          <span class="history-count" id="history-count">0 înregistrări</span>
+        </div>
+        <div id="history-list" class="history"></div>
+        <p id="empty-state" class="muted" hidden>Nicio tranzacție încă.</p>
+      </section>
 
       <!-- Panou admin separat prin buton setări -->
       <dialog id="settings-dialog" class="modal settings-modal">

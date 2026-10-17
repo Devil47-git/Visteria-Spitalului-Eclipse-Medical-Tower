@@ -37,6 +37,7 @@ function renderLedger(ledger) {
   const list = document.querySelector("#history-list");
   list.replaceChildren();
   document.querySelector("#empty-state").hidden = ledger.transactions.length > 0;
+  document.querySelector("#history-count").textContent = `${ledger.transactions.length} înregistrări`;
   for (const tx of ledger.transactions) {
     const isDeposit = tx.type === "deposit";
     const row = document.createElement("div");
