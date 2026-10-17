@@ -75,11 +75,12 @@ function renderBilant(bilant) {
 
 function memberRow({ discordId, displayName, callsign, role, isHr, pendingCode }, currentUser, onChanged) {
   const row = document.createElement("div");
-  row.className = "member-row";
+  row.className = "member-row whitelist-row";
   const left = document.createElement("div");
+  left.title = discordId;
   const name = document.createElement("div");
   const roleLabels = { "001": "Director General", "002": "Director adjunct", "003": "Director adjunct", "004": "Director adjunct", "005": "Medic Inspector", "006": "Medic Inspector", "007": "Medic Inspector", "008": "Medic Inspector", "009": "Medic Chirurg", "010": "Medic Chirurg", "011": "Medic Chirurg", "012": "Medic Chirurg" };
-  name.textContent = `${displayName} · ${callsign} · ${roleLabels[role] ? `${role} — ${roleLabels[role]}` : "Membru"}${isHr ? " · Șef HR" : ""}${pendingCode ? " · COD ÎN AȘTEPTARE" : ""}`;
+  name.textContent = `${displayName} · ${callsign} · ${roleLabels[role] ? `${role} — ${roleLabels[role]}` : "Membru"}${pendingCode ? " · COD ÎN AȘTEPTARE" : ""}`;
   if (pendingCode) name.classList.add("pending-access");
   const id = document.createElement("div");
   id.className = "member-id";
@@ -275,7 +276,7 @@ async function loadDashboard() {
     const roleTitles = { "001": "Director General", "002": "Director adjunct", "003": "Director adjunct", "004": "Director adjunct", "005": "Medic Inspector", "006": "Medic Inspector", "007": "Medic Inspector", "008": "Medic Inspector", "009": "Medic Chirurg", "010": "Medic Chirurg", "011": "Medic Chirurg", "012": "Medic Chirurg" };
     const identity = document.querySelector("#user-identity");
     const roleText = roleTitles[user.role] || "Membru";
-    identity.textContent = `${user.displayName} · ${user.callsign} · ${roleText}${user.isHr ? " · Șef HR" : ""}`;
+    identity.textContent = `${user.displayName} · ${user.callsign} · ${roleText}`;
     identity.title = identity.textContent;
     document.querySelector("#settings-open").hidden = !user.isDirector;
     document.querySelector("#bilant-action-row").hidden = !user.isDirector;
