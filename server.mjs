@@ -509,7 +509,7 @@ async function serveStatic(response, pathname) {
     response.writeHead(404);
     return response.end("Pagina nu a fost găsită.");
   }
-  const contentTypes = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml" };
+  const contentTypes = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml" };
   response.writeHead(200, {
     "Content-Type": contentTypes[extname(filePath)] || "application/octet-stream",
     "Cache-Control": "no-cache",
