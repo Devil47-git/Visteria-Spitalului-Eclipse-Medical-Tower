@@ -33,7 +33,7 @@ function renderLedger(ledger) {
   currentLedger = ledger;
   const balance = document.querySelector("#balance-amount");
   balance.dataset.value = currency(ledger.balanceCents);
-  balance.textContent = balance.classList.contains("concealed") ? "••" : balance.dataset.value;
+  balance.textContent = balance.classList.contains("concealed") ? balance.dataset.value : balance.dataset.value;
   const list = document.querySelector("#history-list");
   list.replaceChildren();
   document.querySelector("#empty-state").hidden = ledger.transactions.length > 0;
@@ -281,7 +281,7 @@ document.querySelector("#pending-logout").addEventListener("click", logout);
 document.querySelector("#balance-amount").addEventListener("click", (event) => {
   const button = event.currentTarget;
   button.classList.toggle("concealed");
-  button.textContent = button.classList.contains("concealed") ? "••" : button.dataset.value;
+  button.textContent = button.dataset.value;
 });
 
 let liveRefreshTimer;
