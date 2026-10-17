@@ -335,3 +335,81 @@ form {
   border-color: var(--danger);
   color: #ffb0b2;
 }
+
+/* Overlay blur/contrast over the background image, keeping interface crisp. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: rgba(3, 6, 5, 0.68);
+  backdrop-filter: blur(5px);
+  pointer-events: none;
+}
+
+[hidden] { display: none !important; }
+.dash-header { position: relative; justify-content: center; min-height: 48px; }
+.dash-header > div { text-align: center; }
+#settings-open { position: absolute; left: 0; top: 2px; }
+.icon-button, .modal-close {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(18, 24, 19, 0.86);
+  color: var(--text);
+  width: 42px;
+  height: 42px;
+  cursor: pointer;
+  font-size: 1.3rem;
+}
+.balance-box { text-align: center; }
+.balance {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  display: block;
+  margin: 8px auto 0;
+  color: var(--accent);
+}
+.balance.concealed { filter: blur(12px); user-select: none; }
+.actions { gap: 12px; margin: 14px 0 8px; }
+.action-button { width: 100%; font-size: 1rem; padding: 16px; border-radius: 12px; }
+.btn-secondary { background: #29332c; color: var(--text); }
+.bilant-toggle, .bilant-open { width: 100%; margin: 8px 0 14px; }
+.modal {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text);
+  width: min(540px, calc(100% - 28px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  margin: auto;
+}
+.modal::backdrop { background: rgba(0,0,0,.76); backdrop-filter: blur(7px); }
+.modal-card, .settings-card { position: relative; display: flex; flex-direction: column; gap: 10px; }
+.modal-card .modal-close, .settings-card .modal-close { position: absolute; right: 14px; top: 14px; }
+.modal-card h2 { margin: 6px 48px 12px 0; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px; }
+.modal-actions .btn { flex: 1; }
+.callsign-input { display: flex; align-items: center; gap: 0; }
+.callsign-input > span {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-right: 0;
+  border-radius: 10px 0 0 10px;
+  color: var(--accent);
+  background: rgba(0,0,0,.35);
+}
+.callsign-input input { border-radius: 0 10px 10px 0; }
+.checkbox-row { display: flex; align-items: center; gap: 10px; color: var(--muted); }
+.checkbox-row input { width: auto; accent-color: var(--accent); }
+.settings-modal { width: min(760px, calc(100% - 24px)); }
+.settings-card { padding-top: 30px; }
+.member-row { flex-wrap: wrap; }
+.history { max-height: 56vh; overflow: auto; }
+.tx-amount { font-family: ui-monospace, monospace; }
+@media (max-width: 560px) {
+  main { padding: 18px 12px 40px; }
+  .bilant-grid { grid-template-columns: 1fr; }
+  .modal-actions { flex-direction: column-reverse; }
+}

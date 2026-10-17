@@ -4,15 +4,17 @@ import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, extname, resolve, sep } from "node:path";
-import { createAccessCodeRequest, createRedeemRequest, parseAmountToCents } from "./lib/access.mjs";
+import { createAccessCodeRequest, createRedeemRequest } from "./lib/access.mjs";
+import { parseWholeDollars } from "./lib/money.mjs";
 import { isDirector, normalizeRole, rankForRole } from "./lib/roles.mjs";
 import { sendTransactionWebhook } from "./lib/webhook.mjs";
 import {
-  addAccessEntry,
   createAccessCode,
+  createBootstrapAdmin,
   createSession,
   deleteSession,
   getSession,
+  hasActiveAccessCode,
   listAccessCodes,
   loadAccessList,
   loadLedger,
@@ -22,6 +24,7 @@ import {
   revokeAccessCode,
   setBalanceCents,
   setSessionStage,
+  setUserHr,
   updateUserRole
 } from "./lib/store.mjs";
 
@@ -99,6 +102,10 @@ function isAdminDiscordId(discordId) {
     .includes(discordId);
 }
 
+function isHrUser(user) {
+  return Boolean(user?.isHr || isAdminDiscordId(user?.discordId));
+}
+
 // Rezolvă utilizatorul din sesiune; sesiunea poate fi în etapa "pending"
 // (logat cu Discord dar fără cod introdus) sau "authorized".
 async function resolveSessionUser(session, request, sessionCookie) {
@@ -109,27 +116,30 @@ async function resolveSessionUser(session, request, sessionCookie) {
 
   if (session.stage === "pending") {
     if (member || isAdmin) {
-      // între timp a primit acces direct (adăugat manual / admin) — promovează sesiunea
-      await setSessionStage(sessionCookie, "authorized");
+      await setSessionStage(session.tokenHash || sessionCookie, "authorized");
       session.stage = "authorized";
-    } else {
+    } else if (await hasActiveAccessCode(session.discordId)) {
       return { stage: "pending", discordId: session.discordId, displayName: session.discordDisplayName };
+    } else {
+      await deleteSession(sessionCookie);
+      return undefined;
     }
   }
 
   if (!member && !isAdmin) {
-    // accesul i-a fost revoat — șterge sesiunea
     await deleteSession(cookieValue(request, "visterie_session"));
     return undefined;
   }
-  const role = member?.role || "007";
+  const role = member?.role || "membru";
+  const isHr = isHrUser({ discordId: session.discordId, isHr: member?.isHr });
   const user = {
     discordId: session.discordId,
     displayName: member?.displayName || session.discordDisplayName,
-    callsign: member?.callsign || "—",
+    callsign: member?.callsign || "M-",
     role,
+    isHr,
     isAdmin,
-    isDirector: isAdmin || isDirector(role)
+    isDirector: isAdmin || isHr || isDirector(role)
   };
   return { stage: "authorized", user };
 }
@@ -146,7 +156,7 @@ async function handleApi(request, response, url) {
   // Etapa 2: persoana logată cu Discord introduce codul primit de la director
   if (url.pathname === "/api/access-code/redeem" && request.method === "POST") {
     if (!resolved || resolved.stage !== "pending") {
-      return sendJson(response, 400, { error: "Conectează-te întâi cu Discord." });
+      return sendJson(response, 401, { error: "Sesiunea Discord a expirat. Reîncarcă pagina și conectează-te din nou." });
     }
     if (!isSameOrigin(request)) return sendJson(response, 403, { error: "Cererea nu este permisă." });
     let body;
@@ -188,12 +198,15 @@ async function handleApi(request, response, url) {
         return sendJson(response, 400, { error: "Alege adăugare sau retragere." });
       }
       let amountCents;
-      try {
-        amountCents = parseAmountToCents(body.amount);
-      } catch (error) {
-        return sendJson(response, 400, { error: error.message });
+      try { amountCents = parseWholeDollars(body.amount); }
+      catch (error) { return sendJson(response, 400, { error: error.message }); }
+      const targetCallsign = typeof body.targetCallsign === "string" ? body.targetCallsign.trim().toUpperCase() : "";
+      const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 120) : "";
+      if (!/^M-[A-Z0-9-]{1,28}$/.test(targetCallsign)) {
+        return sendJson(response, 400, { error: "Callsign invalid. Folosește formatul M-XXX." });
       }
-      const note = typeof body.note === "string" ? body.note.trim().slice(0, 120) : "";
+      if (!reason) return sendJson(response, 400, { error: "Introdu motivul tranzacției." });
+      const note = `${body.type === "deposit" ? "De la" : "Pentru"} ${targetCallsign} — ${reason}`;
       const result = await recordTransaction({ type: body.type, amountCents, note, user });
       if (result.insufficientBalance) {
         return sendJson(response, 400, { error: "Soldul vistieriei nu este suficient pentru această retragere." });
@@ -205,6 +218,7 @@ async function handleApi(request, response, url) {
         note,
         actor: user.displayName,
         callsign: user.callsign,
+        targetCallsign,
         discordId: user.discordId,
         balanceCents: result.ledger.balanceCents
       }).catch(() => { });
@@ -231,10 +245,22 @@ async function handleApi(request, response, url) {
         } catch (error) {
           return sendJson(response, 400, { error: error.message });
         }
-        await addAccessEntry(requestPayload);
+        if (requestPayload.isHr && !user.isHr && !user.isAdmin) {
+          return sendJson(response, 403, { error: "Doar un șef HR poate acorda funcția de șef HR." });
+        }
+        if (rankForRole(requestPayload.role) <= 4 && !user.isHr && !user.isAdmin) {
+          return sendJson(response, 403, { error: "Doar șeful HR poate genera coduri pentru roluri de director." });
+        }
+        if (requestPayload.isHr && !user.isHr && !user.isAdmin) {
+          return sendJson(response, 403, { error: "Doar un șef HR poate acorda funcția de șef HR." });
+        }
         const code = await createAccessCode({
           discordId: requestPayload.discordId,
-          createdBy: user.displayName
+          createdBy: user.displayName,
+          displayName: requestPayload.displayName,
+          callsign: requestPayload.callsign,
+          role: requestPayload.role,
+          isHr: requestPayload.isHr
         });
         return sendJson(response, 201, code);
       }
@@ -265,31 +291,45 @@ async function handleApi(request, response, url) {
 
       // Schimbare rol — doar 007 poate acorda roluri de director (001–004)
       if (url.pathname === "/api/admin/access/role" && request.method === "POST") {
+        if (!user.isHr && !user.isAdmin && user.role !== "001") {
+          return sendJson(response, 403, { error: "Doar șeful HR sau directorul general poate modifica rolurile." });
+        }
         const body = await readJson(request);
         const discordId = typeof body?.discordId === "string" ? body.discordId.trim() : "";
         const role = normalizeRole(body?.role);
         if (!/^\d{17,20}$/.test(discordId)) {
           return sendJson(response, 400, { error: "ID Discord invalid." });
         }
-        if (rankForRole(role) <= 4 && user.role !== "007" && !user.isAdmin) {
-          return sendJson(response, 403, { error: "Doar șeful HR (007) poate acorda roluri de director." });
+        if (rankForRole(role) <= 4 && !user.isHr && !user.isAdmin) {
+          return sendJson(response, 403, { error: "Doar șeful HR poate acorda roluri de director." });
+        }
+        if (discordId === user.discordId && rankForRole(role) > 4 && !user.isHr && !user.isAdmin) {
+          return sendJson(response, 403, { error: "Nu poți elimina propriile tale permisiuni de director." });
         }
         const updated = await updateUserRole(discordId, role);
         if (!updated) return sendJson(response, 404, { error: "Persoana nu există în whitelist." });
         return sendJson(response, 200, { ok: true, role });
+      }
+      if (url.pathname === "/api/admin/access/hr" && request.method === "POST") {
+        if (!user.isHr && !user.isAdmin) return sendJson(response, 403, { error: "Doar șeful HR poate modifica această opțiune." });
+        const body = await readJson(request);
+        const discordId = typeof body?.discordId === "string" ? body.discordId.trim() : "";
+        const enabled = body?.enabled === true;
+        if (!/^\\d{17,20}$/.test(discordId)) return sendJson(response, 400, { error: "ID Discord invalid." });
+        const updated = await setUserHr(discordId, enabled);
+        if (!updated) return sendJson(response, 404, { error: "Persoana nu există în whitelist." });
+        return sendJson(response, 200, { ok: true, isHr: enabled });
       }
 
       // Sold editabil manual — pentru ajustarea sumei înainte de lansare
       if (url.pathname === "/api/admin/balance" && request.method === "POST") {
         const body = await readJson(request);
         let cents;
-        try {
-          cents = parseAmountToCents(body.amount);
-        } catch (error) {
-          return sendJson(response, 400, { error: error.message });
-        }
+        try { cents = parseWholeDollars(body.amount); }
+        catch (error) { return sendJson(response, 400, { error: error.message }); }
         await setBalanceCents(cents);
-        return sendJson(response, 200, { ok: true, ledger: await loadLedger() });
+        const ledger = await loadLedger();
+        return sendJson(response, 200, { ok: true, ledger });
       }
 
       // Bilanț — doar directori adjunct+ și 007
@@ -375,7 +415,11 @@ async function handleOAuth(request, response, url) {
     // Dacă e deja pe whitelist (adăugat de un director), intră direct.
     // Altfel sesiunea pornește în etapa "pending": trebuie să introducă codul.
     const allowedUsers = await loadAccessList();
-    const whitelisted = allowedUsers.some((entry) => entry.discordId === discordUser.id) || isAdminDiscordId(discordUser.id);
+    let whitelisted = allowedUsers.some((entry) => entry.discordId === discordUser.id)
+      || isAdminDiscordId(discordUser.id);
+    if (!whitelisted && allowedUsers.length === 0) {
+      whitelisted = await createBootstrapAdmin(discordUser.id, discordUser.global_name || discordUser.username);
+    }
     const displayName = discordUser.global_name || discordUser.username;
     const sessionId = randomBytes(32).toString("hex");
     await createSession(sessionId, discordUser.id, displayName, whitelisted ? "authorized" : "pending");

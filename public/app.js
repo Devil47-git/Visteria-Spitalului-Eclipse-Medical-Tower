@@ -1,5 +1,8 @@
-const currency = new Intl.NumberFormat("ro-RO", { style: "currency", currency: "RON" });
+const currency = (cents) => `$${Math.round(cents / 100).toLocaleString("en-US")}`;
 let toastTimeout;
+let currentLedger;
+let currentUser;
+let transactionType = "deposit";
 
 function showToast(message, isError = false) {
   const toast = document.querySelector("#toast");
@@ -27,7 +30,10 @@ function showView(stage) {
 }
 
 function renderLedger(ledger) {
-  document.querySelector("#balance-amount").textContent = currency.format(ledger.balanceCents / 100);
+  currentLedger = ledger;
+  const balance = document.querySelector("#balance-amount");
+  balance.dataset.value = currency(ledger.balanceCents);
+  balance.textContent = balance.classList.contains("concealed") ? "••" : balance.dataset.value;
   const list = document.querySelector("#history-list");
   list.replaceChildren();
   document.querySelector("#empty-state").hidden = ledger.transactions.length > 0;
@@ -44,24 +50,25 @@ function renderLedger(ledger) {
     details.append(title, meta);
     const amount = document.createElement("span");
     amount.className = `tx-amount ${isDeposit ? "deposit" : "withdrawal"}`;
-    amount.textContent = `${isDeposit ? "+" : "−"}${currency.format(tx.amountCents / 100)}`;
+    amount.textContent = `${isDeposit ? "+" : "−"}${currency(tx.amountCents)}`;
     row.append(details, amount);
     list.append(row);
   }
 }
 
 function renderBilant(bilant) {
-  document.querySelector("#bilant-dep").textContent = currency.format(bilant.totalDepositsCents / 100);
-  document.querySelector("#bilant-wd").textContent = currency.format(bilant.totalWithdrawalsCents / 100);
-  document.querySelector("#bilant-profit").textContent = currency.format(bilant.profitCents / 100);
+  document.querySelector("#settings-bilant-dep").textContent = currency(bilant.totalDepositsCents);
+  document.querySelector("#settings-bilant-wd").textContent = currency(bilant.totalWithdrawalsCents);
+  document.querySelector("#settings-bilant-profit").textContent = currency(bilant.profitCents);
 }
 
-function memberRow({ discordId, displayName, callsign, role }, currentUser, onChanged) {
+function memberRow({ discordId, displayName, callsign, role, isHr }, currentUser, onChanged) {
   const row = document.createElement("div");
   row.className = "member-row";
   const left = document.createElement("div");
   const name = document.createElement("div");
-  name.textContent = `${displayName} · ${callsign} (${role})`;
+  const roleLabels = { "001": "Director General", "002": "Director adjunct", "003": "Director adjunct", "004": "Director adjunct", "005": "Medic Inspector", "006": "Medic Inspector", "007": "Medic Inspector", "008": "Medic Inspector", "009": "Medic Chirurg", "010": "Medic Chirurg", "011": "Medic Chirurg", "012": "Medic Chirurg" };
+  name.textContent = `${displayName} · ${callsign} · ${roleLabels[role] ? `${role} — ${roleLabels[role]}` : "Membru"}${isHr ? " · Șef HR" : ""}`;
   const id = document.createElement("div");
   id.className = "member-id";
   id.textContent = discordId;
@@ -70,20 +77,21 @@ function memberRow({ discordId, displayName, callsign, role }, currentUser, onCh
   const controls = document.createElement("div");
   controls.style.display = "flex";
   controls.style.gap = "6px";
+  const isChief = currentUser.isHr || currentUser.isAdmin;
   const roleSelect = document.createElement("select");
   roleSelect.className = "role-select";
-  for (const r of ["membru", "006", "005", "004", "003", "002", "001", "007"]) {
+  const roles = ["membru", ...Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(3, "0"))];
+  const labels = { "001": "001 — Director General", "002": "002 — Director adjunct", "003": "003 — Director adjunct", "004": "004 — Director adjunct", "005": "005 — Medic Inspector", "006": "006 — Medic Inspector", "007": "007 — Medic Inspector", "008": "008 — Medic Inspector", "009": "009 — Medic Chirurg", "010": "010 — Medic Chirurg", "011": "011 — Medic Chirurg", "012": "012 — Medic Chirurg" };
+  for (const r of roles) {
     const option = document.createElement("option");
     option.value = r;
-    option.textContent = r === "membru" ? "Membru" : r;
+    option.textContent = labels[r] || "Membru";
     option.selected = r === role;
     roleSelect.append(option);
   }
-  // doar 007 poate acorda roluri de director
-  const isChief = currentUser.role === "007" || currentUser.isAdmin;
   if (!isChief) {
     for (const option of roleSelect.options) {
-      if (["001", "002", "003", "004", "007"].includes(option.value) && option.value !== role) option.disabled = true;
+      if (["001", "002", "003", "004"].includes(option.value) && option.value !== role) option.disabled = true;
     }
   }
   roleSelect.addEventListener("change", async () => {
@@ -96,6 +104,25 @@ function memberRow({ discordId, displayName, callsign, role }, currentUser, onCh
       roleSelect.value = role;
     }
   });
+
+  const hrLabel = document.createElement("label");
+  hrLabel.className = "member-id";
+  const hrCheck = document.createElement("input");
+  hrCheck.type = "checkbox";
+  hrCheck.checked = Boolean(isHr);
+  hrCheck.disabled = !isChief;
+  hrCheck.title = "Funcția separată de Șef HR";
+  hrCheck.addEventListener("change", async () => {
+    try {
+      await api("/api/admin/access/hr", { method: "POST", body: JSON.stringify({ discordId, enabled: hrCheck.checked }) });
+      showToast("Funcția HR a fost actualizată.");
+      onChanged();
+    } catch (error) {
+      showToast(error.message, true);
+      hrCheck.checked = !hrCheck.checked;
+    }
+  });
+  hrLabel.append(hrCheck, document.createTextNode(" HR"));
 
   const removeButton = document.createElement("button");
   removeButton.className = "btn btn-small btn-danger";
@@ -112,7 +139,7 @@ function memberRow({ discordId, displayName, callsign, role }, currentUser, onCh
       removeButton.disabled = false;
     }
   });
-  controls.append(roleSelect, removeButton);
+  controls.append(roleSelect, hrLabel, removeButton);
   row.append(left, controls);
   return row;
 }
@@ -176,13 +203,15 @@ async function loadDashboard() {
 
   if (session.stage === "authorized") {
     const user = session.user;
-    document.querySelector("#user-identity").textContent = `${user.displayName} · ${user.callsign} · ${user.role}`;
+    currentUser = user;
+    const roleTitles = { "001": "Director General", "002": "Director adjunct", "003": "Director adjunct", "004": "Director adjunct", "005": "Medic Inspector", "006": "Medic Inspector", "007": "Medic Inspector", "008": "Medic Inspector", "009": "Medic Chirurg", "010": "Medic Chirurg", "011": "Medic Chirurg", "012": "Medic Chirurg" };
+    document.querySelector("#user-identity").textContent = `${user.displayName} · ${user.callsign} · ${roleTitles[user.role] ? `${user.role} — ${roleTitles[user.role]}` : "Membru"}${user.isHr ? " · Șef HR" : ""}`;
+    document.querySelector("#settings-open").hidden = !user.isDirector;
+    document.querySelector("#bilant-toggle").hidden = !user.isDirector;
     const ledger = await api("/api/ledger");
     renderLedger(ledger);
     if (user.isDirector) {
-      document.querySelector("#bilant-box").hidden = false;
       document.querySelector("#admin-panel").hidden = false;
-      renderBilant(await api("/api/admin/bilant"));
       await loadAdminPanel(user);
     }
   }
@@ -203,6 +232,60 @@ async function logout() {
 
 document.querySelector("#logout-button").addEventListener("click", logout);
 document.querySelector("#pending-logout").addEventListener("click", logout);
+
+document.querySelector("#balance-amount").addEventListener("click", (event) => {
+  const button = event.currentTarget;
+  button.classList.toggle("concealed");
+  button.textContent = button.classList.contains("concealed") ? "••" : button.dataset.value;
+});
+
+document.querySelector("#settings-open").addEventListener("click", async () => {
+  document.querySelector("#settings-dialog").showModal();
+  try {
+    await loadAdminPanel(currentUser);
+  } catch (error) { showToast(error.message, true); }
+});
+document.querySelector("#settings-close").addEventListener("click", () => document.querySelector("#settings-dialog").close());
+document.querySelector("#settings-dialog").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget) event.currentTarget.close();
+});
+document.querySelector("#bilant-toggle").addEventListener("click", async () => {
+  document.querySelector("#settings-dialog").showModal();
+  const box = document.querySelector("#settings-bilant");
+  box.hidden = false;
+  try {
+    renderBilant(await api("/api/admin/bilant"));
+    document.querySelector("#settings-bilant").scrollIntoView({ block: "nearest" });
+  } catch (error) { showToast(error.message, true); }
+});
+document.querySelector("#bilant-open").addEventListener("click", async () => {
+  const box = document.querySelector("#settings-bilant");
+  box.hidden = !box.hidden;
+  if (!box.hidden) {
+    try { renderBilant(await api("/api/admin/bilant")); }
+    catch (error) { showToast(error.message, true); }
+  }
+});
+
+document.querySelector("#deposit-open").addEventListener("click", () => openTransaction("deposit"));
+document.querySelector("#withdrawal-open").addEventListener("click", () => openTransaction("withdrawal"));
+document.querySelector("#transaction-cancel").addEventListener("click", closeTransaction);
+document.querySelector("#transaction-close").addEventListener("click", closeTransaction);
+document.querySelector("#transaction-dialog").addEventListener("click", (event) => {
+  if (event.target === event.currentTarget) closeTransaction();
+});
+
+function openTransaction(type) {
+  transactionType = type;
+  document.querySelector("#transaction-title").textContent = type === "deposit" ? "Adaugă bani" : "Scoate bani";
+  document.querySelector("#transaction-callsign-label").textContent = type === "deposit" ? "Callsign-ul de la cine adaugă" : "Callsign-ul pentru cine scot";
+  document.querySelector("#transaction-confirm").textContent = type === "deposit" ? "Confirmă adăugarea" : "Confirmă retragerea";
+  document.querySelector("#transaction-dialog").showModal();
+}
+function closeTransaction() {
+  document.querySelector("#transaction-dialog").close();
+  document.querySelector("#transaction-form").reset();
+}
 
 document.querySelector("#redeem-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -231,14 +314,15 @@ document.querySelector("#code-form").addEventListener("submit", async (event) =>
         discordId: document.querySelector("#code-discord-id").value,
         displayName: document.querySelector("#code-display-name").value,
         callsign: document.querySelector("#code-callsign").value,
-        role: document.querySelector("#code-role").value
+        role: document.querySelector("#code-role").value,
+        isHr: document.querySelector("#code-is-hr").checked
       })
     });
-    event.currentTarget.reset();
+    document.querySelector("#code-form").reset();
     document.querySelector("#code-result").hidden = false;
     document.querySelector("#code-value").textContent = code.code;
     showToast("Cod generat. Dă-i persoanei codul.");
-    loadAdminPanel({ role: document.querySelector("#user-identity").textContent.match(/\b00\d\b/)?.[0] || "membru", isAdmin: true });
+    await loadAdminPanel(currentUser);
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -261,8 +345,8 @@ document.querySelector("#balance-form").addEventListener("submit", async (event)
       method: "POST",
       body: JSON.stringify({ mode: "set", amount: document.querySelector("#balance-amount-input").value })
     });
-    event.currentTarget.reset();
     renderLedger(ledger);
+    document.querySelector("#balance-form").reset();
     showToast("Soldul a fost actualizat.");
   } catch (error) {
     showToast(error.message, true);
@@ -271,33 +355,27 @@ document.querySelector("#balance-form").addEventListener("submit", async (event)
   }
 });
 
-for (const [formId, type, amountId, noteId] of [
-  ["deposit-form", "deposit", "deposit-amount", "deposit-note"],
-  ["withdrawal-form", "withdrawal", "withdrawal-amount", "withdrawal-note"]
-]) {
-  document.querySelector(`#${formId}`).addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const button = event.currentTarget.querySelector("button[type=submit]");
-    button.disabled = true;
-    try {
-      const ledger = await api("/api/transactions", {
-        method: "POST",
-        body: JSON.stringify({
-          type,
-          amount: document.querySelector(`#${amountId}`).value,
-          note: document.querySelector(`#${noteId}`).value
-        })
-      });
-      event.currentTarget.reset();
-      renderLedger(ledger);
-      showToast(type === "deposit" ? "Suma a fost adăugată." : "Suma a fost scoasă.");
-    } catch (error) {
-      showToast(error.message, true);
-    } finally {
-      button.disabled = false;
-    }
-  });
-}
+document.querySelector("#transaction-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = document.querySelector("#transaction-confirm");
+  button.disabled = true;
+  try {
+    const amount = document.querySelector("#transaction-amount").value;
+    const callsign = `M-${document.querySelector("#transaction-callsign").value.trim().replace(/^M-/i, "")}`;
+    const reason = document.querySelector("#transaction-reason").value;
+    const ledger = await api("/api/transactions", {
+      method: "POST",
+      body: JSON.stringify({ type: transactionType, amount, targetCallsign: callsign, reason })
+    });
+    renderLedger(ledger);
+    closeTransaction();
+    showToast(transactionType === "deposit" ? "Suma a fost adăugată." : "Suma a fost scoasă.");
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
 
 loadDashboard().catch((error) => {
   showView("anonymous");
