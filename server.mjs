@@ -472,6 +472,9 @@ export async function handler(request, response) {
   response.setHeader("X-Frame-Options", "DENY");
   try {
     const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
+    if (url.pathname === "/styles.css" || url.pathname === "/app.js") {
+      response.setHeader("Cache-Control", "no-store, max-age=0");
+    }
     if (url.pathname.startsWith("/api/auth/")) {
       url.pathname = url.pathname.slice("/api".length);
     }

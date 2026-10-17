@@ -235,8 +235,7 @@ async function loadDashboard() {
   if (session.stage === "anonymous") {
     document.querySelector("#user-identity").textContent = "";
     document.querySelector("#settings-open").hidden = true;
-    document.querySelector("#bilant-toggle").hidden = true;
-    document.querySelector(".actions").classList.remove("has-bilant");
+    document.querySelector("#bilant-action-row").hidden = true;
   }
 
   if (session.stage === "authorized") {
@@ -251,8 +250,7 @@ async function loadDashboard() {
     identity.textContent = `${user.displayName} · ${user.callsign} · ${roleText}${user.isHr ? " · Șef HR" : ""}`;
     identity.title = identity.textContent;
     document.querySelector("#settings-open").hidden = !user.isDirector;
-    document.querySelector("#bilant-toggle").hidden = !user.isDirector;
-    document.querySelector(".actions").classList.toggle("has-bilant", user.isDirector);
+    document.querySelector("#bilant-action-row").hidden = !user.isDirector;
     const ledger = await api("/api/ledger");
     renderLedger(ledger);
     if (user.isDirector) {
