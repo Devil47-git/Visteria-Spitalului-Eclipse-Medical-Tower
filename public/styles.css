@@ -443,7 +443,7 @@ main { position: relative; z-index: 1; }
   width: min(820px, calc(100% - 24px));
   height: min(90dvh, 860px);
   max-height: min(90dvh, 860px);
-  overflow: hidden;
+  overflow: visible;
   margin: auto;
   padding: 0;
   overscroll-behavior: contain;
@@ -501,23 +501,17 @@ main { position: relative; z-index: 1; }
 .bilant-action-row .bilant-toggle { min-height: 60px; width: min(100%, 430px); padding-inline: 24px; font-size: 1.12rem; font-weight: 700; letter-spacing: .025em; }
 #settings-dialog[open] {
   display: block;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 .settings-scroll {
-  position: absolute;
-  inset: 0;
+  position: relative;
   width: 100%;
-  height: 100%;
-  overflow-x: hidden;
-  overflow-y: scroll;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: auto;
-  scrollbar-color: rgba(103,232,249,.65) rgba(5,11,16,.95);
+  min-height: 100%;
+  overflow: visible;
 }
-.settings-scroll::-webkit-scrollbar { width: 10px; }
-.settings-scroll::-webkit-scrollbar-track { background: rgba(5,11,16,.95); border-radius: 8px; }
-.settings-scroll::-webkit-scrollbar-thumb { background: linear-gradient(180deg,#67e8f9,#2e8796); border: 2px solid rgba(5,11,16,.95); border-radius: 8px; }
 .settings-scroll > .settings-card { width: 100%; min-height: 100%; }
 .settings-card .danger-zone .btn { margin-top: 4px; }
 .dash-header { padding: 0 88px; }
@@ -528,6 +522,8 @@ main { position: relative; z-index: 1; }
 }
 .danger-zone { border-color: rgba(237,66,69,.26) !important; }
 .member-row { flex-wrap: wrap; }
+.pending-access { color: #ffc778; }
+.pending-hint { color: #ffc778; opacity: .86; }
 .history { max-height: min(58vh, 620px); overflow-y: auto; }
 .tx-amount { font-family: ui-monospace, monospace; }
 @media (max-width: 560px) {

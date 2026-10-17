@@ -3,6 +3,19 @@ import assert from "node:assert/strict";
 import { createAccessEntry, createAccessCodeRequest, createRedeemRequest, parseAmountToCents } from "../lib/access.mjs";
 import { isDirector, rankForRole, normalizeRole } from "../lib/roles.mjs";
 import { formatDollars } from "../lib/money.mjs";
+import { accessForOAuth, accessForPendingSession } from "../lib/access-policy.mjs";
+
+test("active invite codes take precedence over old whitelist rows; bootstrap is explicit", () => {
+  assert.equal(accessForOAuth({ isAdmin: false, isWhitelisted: true, hasActiveCode: true, bootstrapAllowed: false }), "pending");
+  assert.equal(accessForOAuth({ isAdmin: true, isWhitelisted: true, hasActiveCode: true, bootstrapAllowed: false }), "pending");
+  assert.equal(accessForOAuth({ isAdmin: true, isWhitelisted: false, hasActiveCode: true, bootstrapAllowed: false }), "pending");
+  assert.equal(accessForOAuth({ isAdmin: true, isWhitelisted: false, hasActiveCode: false, bootstrapAllowed: false }), "authorized");
+  assert.equal(accessForOAuth({ isAdmin: false, isWhitelisted: false, hasActiveCode: false, bootstrapAllowed: false }), "denied");
+  assert.equal(accessForOAuth({ isAdmin: true, isWhitelisted: false, hasActiveCode: false, bootstrapAllowed: false }), "authorized");
+  assert.equal(accessForOAuth({ isAdmin: false, isWhitelisted: false, hasActiveCode: false, bootstrapAllowed: true }), "bootstrap");
+  assert.equal(accessForPendingSession({ isAdmin: false, isWhitelisted: true, hasActiveCode: true }), "pending");
+  assert.equal(accessForPendingSession({ isAdmin: true, isWhitelisted: false, hasActiveCode: true }), "pending");
+});
 
 test("formats integer dollar display without decimals", () => {
   assert.equal(formatDollars(10000000), "$100,000");
@@ -69,4 +82,26 @@ test("role hierarchy: directors are 001-004, medical tiers are not directors", (
   assert.equal(rankForRole("membru"), 99);
   assert.equal(normalizeRole("004x"), "membru");
   assert.equal(normalizeRole("003"), "003");
+});
+
+
+test("admin access entries sort by callsign numerically", async () => {
+  const { sortAccessEntriesByCallsign } = await import("../public/admin-utils.mjs");
+  const entries = [
+    { callsign: "M-100" },
+    { callsign: "M-012" },
+    { callsign: "M-002" },
+    { callsign: "M-020" }
+  ];
+  assert.deepEqual(sortAccessEntriesByCallsign(entries).map((entry) => entry.callsign), [
+    "M-002", "M-012", "M-020", "M-100"
+  ]);
+  assert.equal(entries[0].callsign, "M-100", "sorting must not mutate the source list");
+});
+
+test("only used or deactivated access codes can be deleted from the admin list", async () => {
+  const { canDeleteAccessCode } = await import("../public/admin-utils.mjs");
+  assert.equal(canDeleteAccessCode({ active: true, usedAt: null }), false);
+  assert.equal(canDeleteAccessCode({ active: false, usedAt: null }), true);
+  assert.equal(canDeleteAccessCode({ active: true, usedAt: "2026-01-01T00:00:00.000Z" }), true);
 });

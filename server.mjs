@@ -5,15 +5,18 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, extname, resolve, sep } from "node:path";
 import { createAccessCodeRequest, createRedeemRequest } from "./lib/access.mjs";
+import { accessForOAuth, accessForPendingSession } from "./lib/access-policy.mjs";
 import { parseWholeDollars } from "./lib/money.mjs";
 import { isDirector, normalizeRole, rankForRole } from "./lib/roles.mjs";
 import { sendBilantWebhook, sendTransactionWebhook } from "./lib/webhook.mjs";
 import {
   createAccessCode,
-  clearTransactionHistory,
+  resetFinancialData,
+  deleteAccessCode,
   createBootstrapAdmin,
   createSession,
   deleteSession,
+  deleteSessionsForDiscordId,
   getSession,
   hasActiveAccessCode,
   listAccessCodes,
@@ -24,10 +27,12 @@ import {
   redeemAccessCode,
   removeAllAccessForDiscordId,
   revokeAccessCode,
+  requireCodeForUser,
   saveBilant,
   setBalanceCents,
   setSessionStage,
   setUserHr,
+  upsertPendingAccessProfile,
   updateUserRole
 } from "./lib/store.mjs";
 
@@ -114,19 +119,34 @@ function isHrUser(user) {
 async function resolveSessionUser(session, request, sessionCookie) {
   if (!session) return undefined;
   const users = await loadAccessList();
-  const member = users.find((user) => user.discordId === session.discordId);
+  const storedMember = users.find((user) => user.discordId === session.discordId);
+  const member = storedMember?.pendingCode ? undefined : storedMember;
   const isAdmin = isAdminDiscordId(session.discordId);
+  const hasActiveCode = await hasActiveAccessCode(session.discordId);
+  const isCodeRedeemer = session.codeRequired === true;
+
+  // A code issued to an existing, already-whitelisted account still gates the
+  // session until that account redeems the one-time grant.
+  if (isCodeRedeemer && hasActiveCode) {
+    if (session.stage !== "pending") await setSessionStage(sessionCookie, "pending", true);
+    return { stage: "pending", discordId: session.discordId, displayName: session.discordDisplayName };
+  }
 
   if (session.stage === "pending") {
-    if (member || isAdmin) {
-      await setSessionStage(session.tokenHash || sessionCookie, "authorized");
-      session.stage = "authorized";
-    } else if (await hasActiveAccessCode(session.discordId)) {
+    const access = accessForPendingSession({
+      isAdmin,
+      isWhitelisted: Boolean(member),
+      hasActiveCode: isCodeRedeemer && hasActiveCode
+    });
+    if (access === "pending") {
       return { stage: "pending", discordId: session.discordId, displayName: session.discordDisplayName };
-    } else {
+    }
+    if (access === "denied") {
       await deleteSession(sessionCookie);
       return undefined;
     }
+    await setSessionStage(sessionCookie, "authorized", false);
+    session.stage = "authorized";
   }
 
   if (!member && !isAdmin) {
@@ -180,7 +200,7 @@ async function handleApi(request, response, url) {
       displayName: resolved.displayName
     });
     if (result.error) return sendJson(response, 400, { error: result.error });
-    await setSessionStage(sessionCookie, "authorized");
+    await setSessionStage(sessionCookie, "authorized", false);
     return sendJson(response, 200, { ok: true });
   }
 
@@ -200,10 +220,10 @@ async function handleApi(request, response, url) {
       }
       if (!isSameOrigin(request)) return sendJson(response, 403, { error: "Cererea nu este permisă." });
       const body = await readJson(request);
-      if (body.confirm !== "STERGERE") {
-        return sendJson(response, 400, { error: "Confirmarea ștergerii este invalidă." });
+      if (body.confirm !== "RESETARE") {
+        return sendJson(response, 400, { error: "Confirmarea resetării este invalidă." });
       }
-      await clearTransactionHistory();
+      await resetFinancialData();
       return sendJson(response, 200, { ok: true, ledger: await loadLedger() });
     }
 
@@ -263,6 +283,12 @@ async function handleApi(request, response, url) {
         if ((requestPayload.isHr || rankForRole(requestPayload.role) <= 4) && !user.isHr && !user.isAdmin) {
           return sendJson(response, 403, { error: "Doar șeful HR poate genera coduri de director sau acorda funcția HR." });
         }
+        const existingProfile = (await loadAccessList()).find((entry) => entry.discordId === requestPayload.discordId);
+        const existingMember = Boolean(existingProfile && !existingProfile.pendingCode);
+        const existingActiveCode = await hasActiveAccessCode(requestPayload.discordId);
+        if (existingActiveCode) {
+          return sendJson(response, 409, { error: "Există deja un cod activ pentru acest Discord ID." });
+        }
         const code = await createAccessCode({
           discordId: requestPayload.discordId,
           createdBy: user.displayName,
@@ -271,6 +297,11 @@ async function handleApi(request, response, url) {
           role: requestPayload.role,
           isHr: requestPayload.isHr
         });
+        // Invalidate existing sessions; gate existing whitelist rows and keep
+        // brand-new profiles marked pending until one-time code redemption.
+        await deleteSessionsForDiscordId(requestPayload.discordId);
+        if (existingMember) await requireCodeForUser(requestPayload.discordId);
+        else await upsertPendingAccessProfile(requestPayload);
         return sendJson(response, 201, code);
       }
       if (url.pathname === "/api/admin/codes/revoke" && request.method === "POST") {
@@ -278,6 +309,14 @@ async function handleApi(request, response, url) {
         const code = typeof body?.code === "string" ? body.code.trim().toUpperCase() : "";
         const revoked = await revokeAccessCode(code);
         if (!revoked) return sendJson(response, 404, { error: "Codul nu a fost găsit sau a fost deja folosit." });
+        return sendJson(response, 200, { ok: true });
+      }
+      if (url.pathname === "/api/admin/codes" && request.method === "DELETE") {
+        const body = await readJson(request);
+        const code = typeof body?.code === "string" ? body.code.trim().toUpperCase() : "";
+        if (!code) return sendJson(response, 400, { error: "Codul nu este valid." });
+        const deleted = await deleteAccessCode(code);
+        if (!deleted) return sendJson(response, 404, { error: "Codul nu a fost găsit." });
         return sendJson(response, 200, { ok: true });
       }
 
@@ -309,6 +348,9 @@ async function handleApi(request, response, url) {
         if (!/^\d{17,20}$/.test(discordId)) {
           return sendJson(response, 400, { error: "ID Discord invalid." });
         }
+        if ((await loadAccessList()).some((entry) => entry.discordId === discordId && entry.pendingCode)) {
+          return sendJson(response, 409, { error: "Persoana trebuie să-și activeze codul înainte de schimbarea rolului." });
+        }
         const updated = await updateUserRole(discordId, role);
         if (!updated) return sendJson(response, 404, { error: "Persoana nu există în whitelist." });
         return sendJson(response, 200, { ok: true, role });
@@ -319,6 +361,9 @@ async function handleApi(request, response, url) {
         const discordId = typeof body?.discordId === "string" ? body.discordId.trim() : "";
         const enabled = body?.enabled === true;
         if (!/^\d{17,20}$/.test(discordId)) return sendJson(response, 400, { error: "ID Discord invalid." });
+        if ((await loadAccessList()).some((entry) => entry.discordId === discordId && entry.pendingCode)) {
+          return sendJson(response, 409, { error: "Persoana trebuie să-și activeze codul înainte de acordarea funcției HR." });
+        }
         const updated = await setUserHr(discordId, enabled);
         if (!updated) return sendJson(response, 404, { error: "Persoana nu există în whitelist." });
         return sendJson(response, 200, { ok: true, isHr: enabled });
@@ -430,17 +475,24 @@ async function handleOAuth(request, response, url) {
 
     // Dacă e deja pe whitelist (adăugat de un director), intră direct.
     // Altfel sesiunea pornește în etapa "pending": trebuie să introducă codul.
-    const allowedUsers = await loadAccessList();
-    let whitelisted = allowedUsers.some((entry) => entry.discordId === discordUser.id)
-      || isAdminDiscordId(discordUser.id);
-    if (!whitelisted && allowedUsers.length === 0) {
-      whitelisted = await createBootstrapAdmin(discordUser.id, discordUser.global_name || discordUser.username);
+      const allowedUsers = await loadAccessList();
+    const isWhitelisted = allowedUsers.some((entry) => entry.discordId === discordUser.id && !entry.pendingCode);
+    const isAdmin = isAdminDiscordId(discordUser.id);
+    const hasActiveCode = await hasActiveAccessCode(discordUser.id);
+    // Bootstrap is opt-in and restricted to the configured owner ID only.
+    // There is deliberately no "first random Discord login becomes HR" path.
+    const bootstrapId = process.env.BOOTSTRAP_DISCORD_ID?.trim();
+    const bootstrapAllowed = Boolean(bootstrapId && bootstrapId === discordUser.id && allowedUsers.length === 0);
+    let access = accessForOAuth({ isAdmin, isWhitelisted, hasActiveCode, bootstrapAllowed });
+    if (access === "bootstrap") {
+      const bootstrapped = await createBootstrapAdmin(discordUser.id, discordUser.global_name || discordUser.username);
+      access = bootstrapped ? "authorized" : "denied";
     }
     const displayName = discordUser.global_name || discordUser.username;
     const sessionId = randomBytes(32).toString("hex");
-    await createSession(sessionId, discordUser.id, displayName, whitelisted ? "authorized" : "pending");
+    await createSession(sessionId, discordUser.id, displayName, access, access === "pending" && hasActiveCode);
     setCookie(response, "visterie_session", sessionId, sessionLifetimeMs / 1000);
-    response.writeHead(302, { Location: whitelisted ? "/" : "/?pending=1", "Cache-Control": "no-store" });
+    response.writeHead(302, { Location: access === "authorized" ? "/" : access === "pending" ? "/?pending=1" : "/?error=unauthorized", "Cache-Control": "no-store" });
     return response.end();
   }
   return sendJson(response, 404, { error: "Ruta de autentificare nu există." });

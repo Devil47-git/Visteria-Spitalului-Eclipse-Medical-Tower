@@ -1,3 +1,5 @@
+import { canDeleteAccessCode, sortAccessEntriesByCallsign } from "/admin-utils.mjs";
+
 const currency = (cents) => `$${Math.round(cents / 100).toLocaleString("en-US")}`;
 let toastTimeout;
 let currentLedger;
@@ -71,17 +73,24 @@ function renderBilant(bilant) {
   }
 }
 
-function memberRow({ discordId, displayName, callsign, role, isHr }, currentUser, onChanged) {
+function memberRow({ discordId, displayName, callsign, role, isHr, pendingCode }, currentUser, onChanged) {
   const row = document.createElement("div");
   row.className = "member-row";
   const left = document.createElement("div");
   const name = document.createElement("div");
   const roleLabels = { "001": "Director General", "002": "Director adjunct", "003": "Director adjunct", "004": "Director adjunct", "005": "Medic Inspector", "006": "Medic Inspector", "007": "Medic Inspector", "008": "Medic Inspector", "009": "Medic Chirurg", "010": "Medic Chirurg", "011": "Medic Chirurg", "012": "Medic Chirurg" };
-  name.textContent = `${displayName} · ${callsign} · ${roleLabels[role] ? `${role} — ${roleLabels[role]}` : "Membru"}${isHr ? " · Șef HR" : ""}`;
+  name.textContent = `${displayName} · ${callsign} · ${roleLabels[role] ? `${role} — ${roleLabels[role]}` : "Membru"}${isHr ? " · Șef HR" : ""}${pendingCode ? " · COD ÎN AȘTEPTARE" : ""}`;
+  if (pendingCode) name.classList.add("pending-access");
   const id = document.createElement("div");
   id.className = "member-id";
   id.textContent = discordId;
   left.append(name, id);
+  if (pendingCode) {
+    const hint = document.createElement("div");
+    hint.className = "member-id pending-hint";
+    hint.textContent = "Profil în așteptarea codului — nu are acces la visterie încă";
+    left.append(hint);
+  }
 
   const controls = document.createElement("div");
   controls.style.display = "flex";
@@ -98,9 +107,9 @@ function memberRow({ discordId, displayName, callsign, role, isHr }, currentUser
     option.selected = r === role;
     roleSelect.append(option);
   }
-  if (!currentUser.isHr && !currentUser.isAdmin) {
+  if (pendingCode || (!currentUser.isHr && !currentUser.isAdmin)) {
     for (const option of roleSelect.options) {
-      if (["001", "002", "003", "004"].includes(option.value) && option.value !== role) option.disabled = true;
+      if (option.value !== role) option.disabled = true;
     }
   }
   roleSelect.addEventListener("change", async () => {
@@ -119,7 +128,7 @@ function memberRow({ discordId, displayName, callsign, role, isHr }, currentUser
   const hrCheck = document.createElement("input");
   hrCheck.type = "checkbox";
   hrCheck.checked = Boolean(isHr);
-  hrCheck.disabled = !isChief;
+  hrCheck.disabled = pendingCode || !isChief;
   hrCheck.title = "Funcția separată de Șef HR";
   hrCheck.addEventListener("change", async () => {
     try {
@@ -137,7 +146,7 @@ function memberRow({ discordId, displayName, callsign, role, isHr }, currentUser
   removeButton.className = "btn btn-small btn-danger";
   removeButton.type = "button";
   removeButton.textContent = "Scoate acces";
-  removeButton.disabled = discordId === currentUser.discordId
+  removeButton.disabled = pendingCode || discordId === currentUser.discordId
     || (isHr && currentUser.role !== "001" && !currentUser.isHr && !currentUser.isAdmin);
   removeButton.addEventListener("click", async () => {
     removeButton.disabled = true;
@@ -159,7 +168,8 @@ async function loadAdminPanel(user) {
   const panel = document.querySelector("#admin-panel");
   panel.hidden = false;
   const refresh = async () => {
-    const [{ users }, { codes }, { bilants }] = await Promise.all([api("/api/admin/access"), api("/api/admin/codes"), api("/api/admin/bilants/saved")]);
+    const [{ users: accessEntries }, { codes }, { bilants }] = await Promise.all([api("/api/admin/access"), api("/api/admin/codes"), api("/api/admin/bilants/saved")]);
+    const users = sortAccessEntriesByCallsign([...new Map(accessEntries.map((entry) => [entry.discordId, entry])).values()]);
 
     const members = document.querySelector("#member-list");
     members.replaceChildren();
@@ -202,7 +212,7 @@ async function loadAdminPanel(user) {
       meta.className = "member-id";
       meta.textContent = `Pentru ${code.discordId} · ${code.usedAt ? "folosit" : code.active ? "nefolosit" : "dezactivat"}`;
       left.append(codeLine, meta);
-      if (!code.usedAt && code.active) {
+      if (!canDeleteAccessCode(code)) {
         const revokeButton = document.createElement("button");
         revokeButton.className = "btn btn-small";
         revokeButton.type = "button";
@@ -218,7 +228,24 @@ async function loadAdminPanel(user) {
         });
         row.append(left, revokeButton);
       } else {
-        row.append(left);
+        const deleteButton = document.createElement("button");
+        deleteButton.className = "btn btn-small btn-danger";
+        deleteButton.type = "button";
+        deleteButton.textContent = "Șterge";
+        deleteButton.setAttribute("aria-label", `Șterge codul ${code.code}`);
+        deleteButton.addEventListener("click", async () => {
+          if (!window.confirm(`Ștergi definitiv codul ${code.code}?`)) return;
+          deleteButton.disabled = true;
+          try {
+            await api("/api/admin/codes", { method: "DELETE", body: JSON.stringify({ code: code.code }) });
+            showToast("Cod șters.");
+            await refresh();
+          } catch (error) {
+            showToast(error.message, true);
+            deleteButton.disabled = false;
+          }
+        });
+        row.append(left, deleteButton);
       }
       codesList.append(row);
     }
@@ -258,10 +285,13 @@ async function loadDashboard() {
       document.querySelector("#admin-panel").hidden = false;
       await loadAdminPanel(user);
     }
+  } else {
+    currentUser = undefined;
   }
 
   const params = new URLSearchParams(window.location.search);
   if (params.get("error") === "oauth") showToast("Autentificarea Discord nu a putut fi finalizată.", true);
+  if (params.get("error") === "unauthorized") showToast("Contul nu are acces. Cere unui director un cod emis pentru Discord ID-ul tău.", true);
   if (params.has("error") || params.has("pending")) history.replaceState({}, "", "/");
 }
 
@@ -337,9 +367,9 @@ document.querySelector("#bilant-open").addEventListener("click", async () => {
 });
 
 document.querySelector("#clear-history").addEventListener("click", async (event) => {
-  if (!window.confirm("Atenție: se vor șterge toate tranzacțiile din istoric. Soldul curent și bilanțurile salvate vor rămâne neschimbate. Continui?")) return;
-  const confirmation = window.prompt('Pentru confirmare, scrie STERGERE:');
-  if (confirmation !== "STERGERE") {
+  if (!window.confirm("Atenție: această acțiune va șterge definitiv tranzacțiile și bilanțurile salvate și va reseta soldul la zero. Whitelist-ul și codurile de acces vor rămâne. Continui?")) return;
+  const confirmation = window.prompt('Pentru confirmare, scrie RESETARE:');
+  if (confirmation !== "RESETARE") {
     showToast("Ștergerea a fost anulată.");
     return;
   }
@@ -351,7 +381,7 @@ document.querySelector("#clear-history").addEventListener("click", async (event)
       body: JSON.stringify({ confirm: confirmation })
     });
     renderLedger(ledger);
-    showToast("Istoricul a fost șters. Soldul curent a rămas neschimbat.");
+    showToast("Datele financiare au fost resetate. Whitelist-ul și codurile au fost păstrate.");
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -426,7 +456,7 @@ document.querySelector("#code-form").addEventListener("submit", async (event) =>
     document.querySelector("#code-form").reset();
     document.querySelector("#code-result").hidden = false;
     document.querySelector("#code-value").textContent = code.code;
-    showToast("Cod generat. Dă-i persoanei codul.");
+    showToast(`Cod generat pentru Discord ID ${code.discordId}. Trimite-i codul; trebuie să intre cu acel cont și să-l introducă.`);
     await loadAdminPanel(currentUser);
   } catch (error) {
     showToast(error.message, true);
