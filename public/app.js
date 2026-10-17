@@ -281,10 +281,6 @@ async function loadDashboard() {
     document.querySelector("#bilant-action-row").hidden = !user.isDirector;
     const ledger = await api("/api/ledger");
     renderLedger(ledger);
-    if (user.isDirector) {
-      document.querySelector("#admin-panel").hidden = false;
-      await loadAdminPanel(user);
-    }
   } else {
     currentUser = undefined;
   }
