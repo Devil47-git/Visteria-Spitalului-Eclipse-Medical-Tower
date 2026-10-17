@@ -7,21 +7,24 @@ import { dirname, extname, resolve, sep } from "node:path";
 import { createAccessCodeRequest, createRedeemRequest } from "./lib/access.mjs";
 import { parseWholeDollars } from "./lib/money.mjs";
 import { isDirector, normalizeRole, rankForRole } from "./lib/roles.mjs";
-import { sendTransactionWebhook } from "./lib/webhook.mjs";
+import { sendBilantWebhook, sendTransactionWebhook } from "./lib/webhook.mjs";
 import {
   createAccessCode,
+  clearTransactionHistory,
   createBootstrapAdmin,
   createSession,
   deleteSession,
   getSession,
   hasActiveAccessCode,
   listAccessCodes,
+  listSavedBilants,
   loadAccessList,
   loadLedger,
   recordTransaction,
   redeemAccessCode,
   removeAllAccessForDiscordId,
   revokeAccessCode,
+  saveBilant,
   setBalanceCents,
   setSessionStage,
   setUserHr,
@@ -191,6 +194,19 @@ async function handleApi(request, response, url) {
       return sendJson(response, 200, await loadLedger());
     }
 
+    if (url.pathname === "/api/admin/history" && request.method === "DELETE") {
+      if (user.role !== "001" && !user.isHr && !user.isAdmin) {
+        return sendJson(response, 403, { error: "Doar directorul general sau șeful HR poate șterge istoricul." });
+      }
+      if (!isSameOrigin(request)) return sendJson(response, 403, { error: "Cererea nu este permisă." });
+      const body = await readJson(request);
+      if (body.confirm !== "STERGERE") {
+        return sendJson(response, 400, { error: "Confirmarea ștergerii este invalidă." });
+      }
+      await clearTransactionHistory();
+      return sendJson(response, 200, { ok: true, ledger: await loadLedger() });
+    }
+
     if (url.pathname === "/api/transactions" && request.method === "POST") {
       if (!isSameOrigin(request)) return sendJson(response, 403, { error: "Cererea nu este permisă." });
       const body = await readJson(request);
@@ -200,14 +216,16 @@ async function handleApi(request, response, url) {
       let amountCents;
       try { amountCents = parseWholeDollars(body.amount); }
       catch (error) { return sendJson(response, 400, { error: error.message }); }
-      const targetCallsign = typeof body.targetCallsign === "string" ? body.targetCallsign.trim().toUpperCase() : "";
+      const targetInput = typeof body.targetCallsign === "string" ? body.targetCallsign.trim().toUpperCase() : "";
+      const targetDigits = targetInput.replace(/^M-/, "");
+      const targetCallsign = `M-${targetDigits}`;
       const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 120) : "";
-      if (!/^M-[A-Z0-9-]{1,28}$/.test(targetCallsign)) {
-        return sendJson(response, 400, { error: "Callsign invalid. Folosește formatul M-XXX." });
+      if (!/^\d{3}$/.test(targetDigits)) {
+        return sendJson(response, 400, { error: "Callsign-ul trebuie să conțină exact 3 cifre." });
       }
       if (!reason) return sendJson(response, 400, { error: "Introdu motivul tranzacției." });
-      const note = `${body.type === "deposit" ? "De la" : "Pentru"} ${targetCallsign} — ${reason}`;
-      const result = await recordTransaction({ type: body.type, amountCents, note, user });
+      const note = reason;
+      const result = await recordTransaction({ type: body.type, amountCents, note, targetCallsign, user });
       if (result.insufficientBalance) {
         return sendJson(response, 400, { error: "Soldul vistieriei nu este suficient pentru această retragere." });
       }
@@ -215,12 +233,9 @@ async function handleApi(request, response, url) {
       sendTransactionWebhook({
         type: body.type,
         amountCents,
-        note,
-        actor: user.displayName,
-        callsign: user.callsign,
+        reason,
         targetCallsign,
-        discordId: user.discordId,
-        balanceCents: result.ledger.balanceCents
+        discordId: user.discordId
       }).catch(() => { });
       return sendJson(response, 201, result.ledger);
     }
@@ -245,14 +260,8 @@ async function handleApi(request, response, url) {
         } catch (error) {
           return sendJson(response, 400, { error: error.message });
         }
-        if (requestPayload.isHr && !user.isHr && !user.isAdmin) {
-          return sendJson(response, 403, { error: "Doar un șef HR poate acorda funcția de șef HR." });
-        }
-        if (rankForRole(requestPayload.role) <= 4 && !user.isHr && !user.isAdmin) {
-          return sendJson(response, 403, { error: "Doar șeful HR poate genera coduri pentru roluri de director." });
-        }
-        if (requestPayload.isHr && !user.isHr && !user.isAdmin) {
-          return sendJson(response, 403, { error: "Doar un șef HR poate acorda funcția de șef HR." });
+        if ((requestPayload.isHr || rankForRole(requestPayload.role) <= 4) && !user.isHr && !user.isAdmin) {
+          return sendJson(response, 403, { error: "Doar șeful HR poate genera coduri de director sau acorda funcția HR." });
         }
         const code = await createAccessCode({
           discordId: requestPayload.discordId,
@@ -283,7 +292,7 @@ async function handleApi(request, response, url) {
           return sendJson(response, 400, { error: "ID Discord invalid." });
         }
         if (discordId === user.discordId) {
-          return sendJson(response, 400, { error: "Nu-ți poți revoca singur accesul." });
+          return sendJson(response, 400, { error: "Nu poți elimina propriul cont. Cere altui director general sau șef HR să facă asta." });
         }
         await removeAllAccessForDiscordId(discordId);
         return sendJson(response, 200, { ok: true });
@@ -291,20 +300,14 @@ async function handleApi(request, response, url) {
 
       // Schimbare rol — doar 007 poate acorda roluri de director (001–004)
       if (url.pathname === "/api/admin/access/role" && request.method === "POST") {
-        if (!user.isHr && !user.isAdmin && user.role !== "001") {
-          return sendJson(response, 403, { error: "Doar șeful HR sau directorul general poate modifica rolurile." });
+        if (!user.isHr && !user.isAdmin) {
+          return sendJson(response, 403, { error: "Doar șeful HR poate modifica gradele și rangurile." });
         }
         const body = await readJson(request);
         const discordId = typeof body?.discordId === "string" ? body.discordId.trim() : "";
         const role = normalizeRole(body?.role);
         if (!/^\d{17,20}$/.test(discordId)) {
           return sendJson(response, 400, { error: "ID Discord invalid." });
-        }
-        if (rankForRole(role) <= 4 && !user.isHr && !user.isAdmin) {
-          return sendJson(response, 403, { error: "Doar șeful HR poate acorda roluri de director." });
-        }
-        if (discordId === user.discordId && rankForRole(role) > 4 && !user.isHr && !user.isAdmin) {
-          return sendJson(response, 403, { error: "Nu poți elimina propriile tale permisiuni de director." });
         }
         const updated = await updateUserRole(discordId, role);
         if (!updated) return sendJson(response, 404, { error: "Persoana nu există în whitelist." });
@@ -315,7 +318,7 @@ async function handleApi(request, response, url) {
         const body = await readJson(request);
         const discordId = typeof body?.discordId === "string" ? body.discordId.trim() : "";
         const enabled = body?.enabled === true;
-        if (!/^\\d{17,20}$/.test(discordId)) return sendJson(response, 400, { error: "ID Discord invalid." });
+        if (!/^\d{17,20}$/.test(discordId)) return sendJson(response, 400, { error: "ID Discord invalid." });
         const updated = await setUserHr(discordId, enabled);
         if (!updated) return sendJson(response, 404, { error: "Persoana nu există în whitelist." });
         return sendJson(response, 200, { ok: true, isHr: enabled });
@@ -335,13 +338,26 @@ async function handleApi(request, response, url) {
       // Bilanț — doar directori adjunct+ și 007
       if (url.pathname === "/api/admin/bilant" && request.method === "GET") {
         const ledger = await loadLedger();
+        const start = ledger.periodStart || new Date().toISOString();
+        const end = ledger.periodEnd || new Date().toISOString();
         return sendJson(response, 200, {
           totalDepositsCents: ledger.totalDepositsCents,
           totalWithdrawalsCents: ledger.totalWithdrawalsCents,
           balanceCents: ledger.balanceCents,
           profitCents: ledger.totalDepositsCents - ledger.totalWithdrawalsCents,
-          transactionCount: ledger.transactions.length
+          transactionCount: ledger.transactions.length,
+          periodStart: start,
+          periodEnd: end
         });
+      }
+      if (url.pathname === "/api/admin/bilants/saved" && request.method === "GET") {
+        return sendJson(response, 200, { bilants: await listSavedBilants() });
+      }
+      if (url.pathname === "/api/admin/bilants/save" && request.method === "POST") {
+        if (!isSameOrigin(request)) return sendJson(response, 403, { error: "Cererea nu este permisă." });
+        const bilant = await saveBilant({ createdBy: user.displayName });
+        const discordSent = await sendBilantWebhook(bilant);
+        return sendJson(response, 201, { bilant, discordSent });
       }
 
       return sendJson(response, 404, { error: "Ruta API nu există." });

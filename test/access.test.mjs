@@ -25,24 +25,28 @@ test("access members require a Discord ID, name, callsign, and valid role", () =
   assert.deepEqual(createAccessEntry({
     discordId: "12345678901234567",
     displayName: "Alex",
-    callsign: "M-A-12",
+    callsign: "M-012",
     role: "004"
   }), {
     discordId: "12345678901234567",
     displayName: "Alex",
-    callsign: "M-A-12",
+    callsign: "M-012",
     role: "004",
     isHr: false
   });
   assert.throws(() => createAccessEntry({ discordId: "abc", displayName: "Alex", callsign: "A-12" }));
   assert.throws(() => createAccessEntry({ discordId: "12345678901234567", displayName: "", callsign: "A-12" }));
   assert.throws(() => createAccessEntry({ discordId: "12345678901234567", displayName: "Alex", callsign: "" }));
-  assert.equal(createAccessEntry({ discordId: "12345678901234567", displayName: "Alex", callsign: "A-12", role: "hacker" }).role, "membru");
+  assert.throws(() => createAccessEntry({ discordId: "12345678901234567", displayName: "Alex", callsign: "1", role: "membru" }));
+  assert.throws(() => createAccessEntry({ discordId: "12345678901234567", displayName: "Alex", callsign: "0001", role: "membru" }));
+  assert.deepEqual(createAccessEntry({ discordId: "12345678901234567", displayName: "Alex", callsign: "000", role: "membru" }).callsign, "M-000");
+  assert.equal(createAccessEntry({ discordId: "12345678901234567", displayName: "Alex", callsign: "M-012", role: "hacker" }).role, "membru");
 });
 
 test("code request validation", () => {
-  assert.equal(createAccessCodeRequest({ discordId: "12345678901234567", displayName: "Dan", callsign: "D-01", role: "002" }).role, "002");
-  assert.equal(createAccessCodeRequest({ discordId: "12345678901234567", displayName: "Dan", callsign: "D-01", role: "002" }).callsign, "M-D-01");
+  assert.equal(createAccessCodeRequest({ discordId: "12345678901234567", displayName: "Dan", callsign: "007", role: "002" }).role, "002");
+  assert.equal(createAccessCodeRequest({ discordId: "12345678901234567", displayName: "Dan", callsign: "007", role: "002" }).callsign, "M-007");
+  assert.throws(() => createAccessCodeRequest({ discordId: "12345678901234567", displayName: "Dan", callsign: "01", role: "002" }));
   assert.throws(() => createAccessCodeRequest({ discordId: "12", displayName: "Dan", callsign: "D-01" }));
 });
 

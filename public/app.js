@@ -43,7 +43,7 @@ function renderLedger(ledger) {
     row.className = "tx-row";
     const details = document.createElement("div");
     const title = document.createElement("div");
-    title.textContent = tx.note || (isDeposit ? "Adăugare" : "Retragere");
+    title.textContent = [isDeposit ? "Adăugare" : "Retragere", tx.note].filter(Boolean).join(" · ");
     const meta = document.createElement("div");
     meta.className = "tx-meta";
     meta.textContent = `${new Date(tx.createdAt).toLocaleString("ro-RO", { dateStyle: "short", timeStyle: "short" })} · ${tx.actor} · ${tx.callsign}`;
@@ -57,9 +57,17 @@ function renderLedger(ledger) {
 }
 
 function renderBilant(bilant) {
+  const net = bilant.netCents ?? bilant.profitCents;
   document.querySelector("#settings-bilant-dep").textContent = currency(bilant.totalDepositsCents);
   document.querySelector("#settings-bilant-wd").textContent = currency(bilant.totalWithdrawalsCents);
-  document.querySelector("#settings-bilant-profit").textContent = currency(bilant.profitCents);
+  document.querySelector("#settings-bilant-profit").textContent = `${net < 0 ? "-" : ""}${currency(Math.abs(net))}`;
+  if (bilant.periodStart && bilant.periodEnd && bilant.calculatedAt) {
+    const date = (value) => new Date(value).toLocaleDateString("ro-RO", { timeZone: "Europe/Bucharest" });
+    const time = new Date(bilant.calculatedAt).toLocaleString("ro-RO", { timeZone: "Europe/Bucharest" });
+    document.querySelector("#settings-bilant-period").textContent = `Perioadă: ${date(bilant.periodStart)} - ${date(bilant.periodEnd)} · Calculat la ${time}`;
+  } else {
+    document.querySelector("#settings-bilant-period").textContent = "";
+  }
 }
 
 function memberRow({ discordId, displayName, callsign, role, isHr }, currentUser, onChanged) {
@@ -77,7 +85,7 @@ function memberRow({ discordId, displayName, callsign, role, isHr }, currentUser
   const controls = document.createElement("div");
   controls.style.display = "flex";
   controls.style.gap = "6px";
-  const isChief = currentUser.isHr || currentUser.isAdmin;
+  const isChief = currentUser.isHr || currentUser.isAdmin || currentUser.role === "001";
   const roleSelect = document.createElement("select");
   roleSelect.className = "role-select";
   const roles = ["membru", ...Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(3, "0"))];
@@ -89,7 +97,7 @@ function memberRow({ discordId, displayName, callsign, role, isHr }, currentUser
     option.selected = r === role;
     roleSelect.append(option);
   }
-  if (!isChief) {
+  if (!currentUser.isHr && !currentUser.isAdmin) {
     for (const option of roleSelect.options) {
       if (["001", "002", "003", "004"].includes(option.value) && option.value !== role) option.disabled = true;
     }
@@ -128,6 +136,8 @@ function memberRow({ discordId, displayName, callsign, role, isHr }, currentUser
   removeButton.className = "btn btn-small btn-danger";
   removeButton.type = "button";
   removeButton.textContent = "Scoate acces";
+  removeButton.disabled = discordId === currentUser.discordId
+    || (isHr && currentUser.role !== "001" && !currentUser.isHr && !currentUser.isAdmin);
   removeButton.addEventListener("click", async () => {
     removeButton.disabled = true;
     try {
@@ -148,12 +158,34 @@ async function loadAdminPanel(user) {
   const panel = document.querySelector("#admin-panel");
   panel.hidden = false;
   const refresh = async () => {
-    const [{ users }, { codes }] = await Promise.all([api("/api/admin/access"), api("/api/admin/codes")]);
+    const [{ users }, { codes }, { bilants }] = await Promise.all([api("/api/admin/access"), api("/api/admin/codes"), api("/api/admin/bilants/saved")]);
 
     const members = document.querySelector("#member-list");
     members.replaceChildren();
     document.querySelector("#members-empty").hidden = users.length > 0;
     for (const member of users) members.append(memberRow(member, user, refresh));
+
+    const savedBilants = document.querySelector("#saved-bilants");
+    savedBilants.replaceChildren();
+    document.querySelector("#saved-bilants-empty").hidden = bilants.length > 0;
+    for (const bilant of bilants) {
+      const row = document.createElement("div");
+      row.className = "member-row";
+      const date = new Date(bilant.calculatedAt).toLocaleString("ro-RO", { dateStyle: "short", timeStyle: "short" });
+      const text = document.createElement("span");
+      text.textContent = `${date} · scos ${currency(bilant.totalWithdrawalsCents)} · adăugat ${currency(bilant.totalDepositsCents)} · net ${currency(bilant.netCents)}`;
+      const selectButton = document.createElement("button");
+      selectButton.type = "button";
+      selectButton.className = "btn btn-small";
+      selectButton.textContent = "Vezi";
+      selectButton.addEventListener("click", () => {
+        renderBilant(bilant);
+        document.querySelector("#settings-bilant").hidden = false;
+        document.querySelector("#settings-bilant").scrollIntoView({ block: "nearest" });
+      });
+      row.append(text, selectButton);
+      savedBilants.append(row);
+    }
 
     const codesList = document.querySelector("#codes-list");
     codesList.replaceChildren();
@@ -200,12 +232,20 @@ async function loadDashboard() {
   if (session.stage === "pending") {
     document.querySelector("#pending-name").textContent = session.displayName;
   }
+  if (session.stage === "anonymous") {
+    document.querySelector("#user-identity").textContent = "";
+    document.querySelector("#settings-open").hidden = true;
+    document.querySelector("#bilant-toggle").hidden = true;
+  }
 
   if (session.stage === "authorized") {
     const user = session.user;
     currentUser = user;
+    if (!liveRefreshTimer) liveRefreshTimer = setInterval(() => {
+      if (currentUser && !document.hidden) refreshLedger();
+    }, 5000);
     const roleTitles = { "001": "Director General", "002": "Director adjunct", "003": "Director adjunct", "004": "Director adjunct", "005": "Medic Inspector", "006": "Medic Inspector", "007": "Medic Inspector", "008": "Medic Inspector", "009": "Medic Chirurg", "010": "Medic Chirurg", "011": "Medic Chirurg", "012": "Medic Chirurg" };
-    document.querySelector("#user-identity").textContent = `${user.displayName} · ${user.callsign} · ${roleTitles[user.role] ? `${user.role} — ${roleTitles[user.role]}` : "Membru"}${user.isHr ? " · Șef HR" : ""}`;
+    document.querySelector("#user-identity").textContent = `${user.displayName} · ${roleTitles[user.role] ? `${user.role} — ${roleTitles[user.role]}` : "Membru"}${user.isHr ? " · Șef HR" : ""}`;
     document.querySelector("#settings-open").hidden = !user.isDirector;
     document.querySelector("#bilant-toggle").hidden = !user.isDirector;
     const ledger = await api("/api/ledger");
@@ -224,6 +264,8 @@ async function loadDashboard() {
 async function logout() {
   try {
     await api("/api/logout", { method: "POST" });
+    currentUser = undefined;
+    if (liveRefreshTimer) clearInterval(liveRefreshTimer);
     showView("anonymous");
   } catch (error) {
     showToast(error.message, true);
@@ -238,6 +280,28 @@ document.querySelector("#balance-amount").addEventListener("click", (event) => {
   button.classList.toggle("concealed");
   button.textContent = button.classList.contains("concealed") ? "••" : button.dataset.value;
 });
+
+let liveRefreshTimer;
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && currentUser) refreshLedger();
+});
+
+async function refreshLedger() {
+  if (!currentUser) return;
+  try {
+    const ledger = await api("/api/ledger");
+    const newestId = ledger.transactions[0]?.id;
+    const previousId = currentLedger?.transactions[0]?.id;
+    renderLedger(ledger);
+    if (newestId && previousId && newestId !== previousId) {
+      document.querySelector("#live-update").hidden = false;
+      clearTimeout(window.liveUpdateTimeout);
+      window.liveUpdateTimeout = setTimeout(() => { document.querySelector("#live-update").hidden = true; }, 2800);
+    }
+  } catch (error) { if (error.message) console.warn("Ledger refresh failed", error.message); }
+}
+
+window.addEventListener("beforeunload", () => clearInterval(liveRefreshTimer));
 
 document.querySelector("#settings-open").addEventListener("click", async () => {
   document.querySelector("#settings-dialog").showModal();
@@ -267,6 +331,41 @@ document.querySelector("#bilant-open").addEventListener("click", async () => {
   }
 });
 
+document.querySelector("#clear-history").addEventListener("click", async (event) => {
+  if (!window.confirm("Atenție: se vor șterge toate tranzacțiile din istoric. Soldul curent și bilanțurile salvate vor rămâne neschimbate. Continui?")) return;
+  const confirmation = window.prompt('Pentru confirmare, scrie STERGERE:');
+  if (confirmation !== "STERGERE") {
+    showToast("Ștergerea a fost anulată.");
+    return;
+  }
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const { ledger } = await api("/api/admin/history", {
+      method: "DELETE",
+      body: JSON.stringify({ confirm: confirmation })
+    });
+    renderLedger(ledger);
+    showToast("Istoricul a fost șters. Soldul curent a rămas neschimbat.");
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.querySelector("#bilant-save").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const { bilant, discordSent } = await api("/api/admin/bilants/save", { method: "POST", body: JSON.stringify({}) });
+    renderBilant(bilant);
+    await loadAdminPanel(currentUser);
+    showToast(discordSent ? "Bilanț salvat pe site și trimis pe Discord." : "Bilanț salvat pe site. Discord webhook nu a putut primi mesajul.", !discordSent);
+  } catch (error) { showToast(error.message, true); }
+  finally { button.disabled = false; }
+});
+
 document.querySelector("#deposit-open").addEventListener("click", () => openTransaction("deposit"));
 document.querySelector("#withdrawal-open").addEventListener("click", () => openTransaction("withdrawal"));
 document.querySelector("#transaction-cancel").addEventListener("click", closeTransaction);
@@ -279,6 +378,7 @@ function openTransaction(type) {
   transactionType = type;
   document.querySelector("#transaction-title").textContent = type === "deposit" ? "Adaugă bani" : "Scoate bani";
   document.querySelector("#transaction-callsign-label").textContent = type === "deposit" ? "Callsign-ul de la cine adaugă" : "Callsign-ul pentru cine scot";
+  document.querySelector("#transaction-confirm").className = type === "deposit" ? "btn btn-primary" : "btn btn-danger";
   document.querySelector("#transaction-confirm").textContent = type === "deposit" ? "Confirmă adăugarea" : "Confirmă retragerea";
   document.querySelector("#transaction-dialog").showModal();
 }
@@ -355,6 +455,13 @@ document.querySelector("#balance-form").addEventListener("submit", async (event)
   }
 });
 
+document.querySelector("#transaction-callsign").addEventListener("input", (event) => {
+  event.currentTarget.value = event.currentTarget.value.replace(/\D/g, "").slice(0, 3);
+});
+document.querySelector("#code-callsign").addEventListener("input", (event) => {
+  event.currentTarget.value = event.currentTarget.value.replace(/\D/g, "").slice(0, 3);
+});
+
 document.querySelector("#transaction-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = document.querySelector("#transaction-confirm");
@@ -368,6 +475,9 @@ document.querySelector("#transaction-form").addEventListener("submit", async (ev
       body: JSON.stringify({ type: transactionType, amount, targetCallsign: callsign, reason })
     });
     renderLedger(ledger);
+    if (currentUser?.isDirector) {
+      try { renderBilant(await api("/api/admin/bilant")); } catch { /* main action succeeded */ }
+    }
     closeTransaction();
     showToast(transactionType === "deposit" ? "Suma a fost adăugată." : "Suma a fost scoasă.");
   } catch (error) {
