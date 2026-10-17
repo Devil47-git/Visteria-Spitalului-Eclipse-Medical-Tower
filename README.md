@@ -39,6 +39,9 @@ Importă repo-ul, apoi Settings → Environment Variables:
 | `DISCORD_REDIRECT_URI` | Îl scrii tu | `https://domeniul.vercel.app/auth/discord/callback` |
 | `DISCORD_ADMIN_IDS` | ID-ul tău Discord (și alți șefi, separate prin `,`) — au rang 007 automat | `111111111111111111` |
 | `DISCORD_WEBHOOK_URL` | Serverul Discord → canal → Edit → Integrations → Webhooks → Copy URL | `https://discord.com/api/webhooks/...` |
+| `DISCORD_WEBHOOK_AVATAR_URL` | Opțional: URL HTTPS direct spre `hr.png` pentru avatarul webhook-ului | `https://domeniul-tău/hr.png` |
+| `DISCORD_WEBHOOK_AVATAR_DATA_URI` | Opțional: imagine HR codificată ca Data URI, dacă Discord nu acceptă URL-ul avatarului | `data:image/png;base64,...` |
+| `DISCORD_WEBHOOK_AVATAR_URL` | URL public direct spre imaginea HR (poate fi `https://domeniul-tău/hr.png`) | `https://domeniul-tău/hr.png` |
 
 ## Pornire locală
 

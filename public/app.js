@@ -236,6 +236,7 @@ async function loadDashboard() {
     document.querySelector("#user-identity").textContent = "";
     document.querySelector("#settings-open").hidden = true;
     document.querySelector("#bilant-toggle").hidden = true;
+    document.querySelector(".actions").classList.remove("has-bilant");
   }
 
   if (session.stage === "authorized") {
@@ -245,9 +246,13 @@ async function loadDashboard() {
       if (currentUser && !document.hidden) refreshLedger();
     }, 5000);
     const roleTitles = { "001": "Director General", "002": "Director adjunct", "003": "Director adjunct", "004": "Director adjunct", "005": "Medic Inspector", "006": "Medic Inspector", "007": "Medic Inspector", "008": "Medic Inspector", "009": "Medic Chirurg", "010": "Medic Chirurg", "011": "Medic Chirurg", "012": "Medic Chirurg" };
-    document.querySelector("#user-identity").textContent = `${user.displayName} · ${roleTitles[user.role] ? `${user.role} — ${roleTitles[user.role]}` : "Membru"}${user.isHr ? " · Șef HR" : ""}`;
+    const identity = document.querySelector("#user-identity");
+    const roleText = roleTitles[user.role] || "Membru";
+    identity.textContent = `${user.displayName} · ${user.callsign} · ${roleText}${user.isHr ? " · Șef HR" : ""}`;
+    identity.title = identity.textContent;
     document.querySelector("#settings-open").hidden = !user.isDirector;
     document.querySelector("#bilant-toggle").hidden = !user.isDirector;
+    document.querySelector(".actions").classList.toggle("has-bilant", user.isDirector);
     const ledger = await api("/api/ledger");
     renderLedger(ledger);
     if (user.isDirector) {
@@ -314,6 +319,7 @@ document.querySelector("#settings-dialog").addEventListener("click", (event) => 
   if (event.target === event.currentTarget) event.currentTarget.close();
 });
 document.querySelector("#bilant-toggle").addEventListener("click", async () => {
+  document.querySelector("#admin-panel").hidden = false;
   document.querySelector("#settings-dialog").showModal();
   const box = document.querySelector("#settings-bilant");
   box.hidden = false;

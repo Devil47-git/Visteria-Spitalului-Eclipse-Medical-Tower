@@ -49,9 +49,9 @@
 
       <div class="actions">
         <button class="btn btn-primary action-button" id="deposit-open" type="button">＋ Adaugă bani</button>
+        <button class="btn btn-secondary action-button bilant-toggle" id="bilant-toggle" type="button" hidden>Bilanț</button>
         <button class="btn btn-danger action-button" id="withdrawal-open" type="button">− Scoate bani</button>
       </div>
-      <button class="btn btn-secondary bilant-toggle" id="bilant-toggle" type="button" hidden>Bilanț</button>
       <dialog id="transaction-dialog" class="modal">
         <form id="transaction-form" method="dialog" class="card modal-card">
           <button class="modal-close" id="transaction-close" type="button" aria-label="Închide">×</button>
@@ -140,9 +140,10 @@
           <p id="codes-empty" class="muted small" hidden>Niciun cod.</p>
         </div>
         <div class="card admin-card danger-zone">
-          <h3>Ștergere istoric și sold</h3>
-          <p class="muted small">Șterge definitiv tranzacțiile și setează soldul la $0. Bilanțurile salvate rămân arhivate.</p>
+          <h3>Ștergere istoric</h3>
+          <p class="muted small">Șterge definitiv lista tranzacțiilor. Soldul curent și bilanțurile salvate rămân neschimbate.</p>
           <button class="btn btn-danger" id="clear-history" type="button">Șterge istoricul</button>
+        </div>
         </div>
       </dialog>
     </section>
