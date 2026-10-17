@@ -23,6 +23,9 @@ body {
   justify-content: center;
 }
 
+/* Dialogs are top-layer elements and should never affect dashboard layout. */
+dialog:not([open]) { display: none !important; }
+
 main {
   width: 100%;
   max-width: 880px;
@@ -508,11 +511,20 @@ main { position: relative; z-index: 1; }
 .bilant-action-row .bilant-toggle { min-height: 60px; width: min(100%, 430px); padding-inline: 24px; font-size: 1.12rem; font-weight: 700; letter-spacing: .025em; }
 #settings-dialog[open] {
   display: block;
+  position: fixed;
+  inset: 0;
+  margin: auto;
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  z-index: 100;
 }
+
+/* Keep the settings surface floating over the dashboard, not in document flow. */
+.settings-modal:not([open]) { display: none !important; }
+.settings-scroll { height: auto; min-height: 100%; }
+.settings-card { width: 100%; }
 .settings-modal::-webkit-scrollbar { width: 10px; }
 .settings-modal::-webkit-scrollbar-track { background: rgba(5,11,16,.95); border-radius: 8px; }
 .settings-modal::-webkit-scrollbar-thumb { background: linear-gradient(180deg,#67e8f9,#2e8796); border: 2px solid rgba(5,11,16,.95); border-radius: 8px; }
