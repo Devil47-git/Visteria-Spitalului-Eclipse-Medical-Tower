@@ -440,13 +440,18 @@ main { position: relative; z-index: 1; }
 .checkbox-row { display: flex; align-items: center; gap: 10px; color: var(--muted); }
 .checkbox-row input { width: auto; accent-color: var(--accent); }
 .settings-modal {
+  display: block;
   width: min(820px, calc(100% - 24px));
   height: min(90dvh, 860px);
   max-height: min(90dvh, 860px);
-  overflow: visible;
+  overflow-x: hidden;
+  overflow-y: auto;
   margin: auto;
   padding: 0;
   overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: auto;
+  scrollbar-color: rgba(103,232,249,.65) rgba(5,11,16,.95);
   border: 1px solid rgba(103,232,249,.2);
   border-radius: 22px;
   background: rgba(5,11,16,.98);
@@ -465,7 +470,9 @@ main { position: relative; z-index: 1; }
   -ms-overflow-style: none;
 }
 .settings-card::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none; background: transparent; }
-.settings-modal::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none; background: transparent; }
+.settings-modal::-webkit-scrollbar { width: 10px; }
+.settings-modal::-webkit-scrollbar-track { background: rgba(5,11,16,.95); border-radius: 8px; }
+.settings-modal::-webkit-scrollbar-thumb { background: linear-gradient(180deg,#67e8f9,#2e8796); border: 2px solid rgba(5,11,16,.95); border-radius: 8px; }
 .settings-card .section-title { margin: 0 52px 16px 0; }
 .settings-card > .admin-card,
 .settings-card > .bilant-box {
@@ -506,13 +513,17 @@ main { position: relative; z-index: 1; }
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
 }
+.settings-modal::-webkit-scrollbar { width: 10px; }
+.settings-modal::-webkit-scrollbar-track { background: rgba(5,11,16,.95); border-radius: 8px; }
+.settings-modal::-webkit-scrollbar-thumb { background: linear-gradient(180deg,#67e8f9,#2e8796); border: 2px solid rgba(5,11,16,.95); border-radius: 8px; }
 .settings-scroll {
   position: relative;
   width: 100%;
   min-height: 100%;
   overflow: visible;
+  pointer-events: auto;
 }
-.settings-scroll > .settings-card { width: 100%; min-height: 100%; }
+.settings-scroll > .settings-card { width: 100%; min-height: 100%; pointer-events: auto; }
 .settings-card .danger-zone .btn { margin-top: 4px; }
 .dash-header { padding: 0 88px; }
 @media (max-width: 560px) {
