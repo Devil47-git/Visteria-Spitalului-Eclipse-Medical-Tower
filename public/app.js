@@ -315,9 +315,8 @@ async function loadDashboard() {
       if (currentUser && !document.hidden) refreshLedger();
     }, 5000);
     const identity = document.querySelector("#user-identity");
-    const roleText = user.roleLabel || (user.role === "membru" ? "Retired" : user.role);
-    const callsign = /^\d{3}$/.test(user.role) || user.roleLabel ? `M-${user.role}` : user.callsign;
-    identity.textContent = `${user.displayName} · ${callsign} · ${roleText}`;
+    const roleText = user.role === "membru" ? "Retired" : user.roleLabel || user.role;
+    identity.textContent = `${user.displayName} · ${roleText}`;
     identity.title = identity.textContent;
     document.querySelector("#settings-open").hidden = !user.isDirector;
     document.querySelector("#bilant-action-row").hidden = !user.isDirector;
