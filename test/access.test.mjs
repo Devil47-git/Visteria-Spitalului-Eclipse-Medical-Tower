@@ -85,18 +85,21 @@ test("role hierarchy: directors are 001-004, medical tiers are not directors", (
 });
 
 
-test("admin access entries sort by callsign numerically", async () => {
+test("admin whitelist sorts by hierarchy then callsign numerically", async () => {
   const { sortAccessEntriesByCallsign } = await import("../public/admin-utils.mjs");
   const entries = [
-    { callsign: "M-100" },
-    { callsign: "M-012" },
-    { callsign: "M-002" },
-    { callsign: "M-020" }
+    { role: "membru", callsign: "M-001" },
+    { role: "007", callsign: "M-100" },
+    { role: "007", callsign: "M-012" },
+    { role: "002", callsign: "M-002" },
+    { role: "013", callsign: "M-013" }
   ];
-  assert.deepEqual(sortAccessEntriesByCallsign(entries).map((entry) => entry.callsign), [
-    "M-002", "M-012", "M-020", "M-100"
+  const roles = [{ code: "013", rank: 8 }, { code: "membru", rank: 999 }];
+  assert.deepEqual(sortAccessEntriesByCallsign(entries, roles).map((entry) => entry.role), ["002", "007", "007", "013", "membru"]);
+  assert.deepEqual(sortAccessEntriesByCallsign(entries, roles).map((entry) => entry.callsign), [
+    "M-002", "M-012", "M-100", "M-013", "M-001"
   ]);
-  assert.equal(entries[0].callsign, "M-100", "sorting must not mutate the source list");
+  assert.equal(entries[0].callsign, "M-001", "sorting must not mutate the source list");
 });
 
 test("only used or deactivated access codes can be deleted from the admin list", async () => {

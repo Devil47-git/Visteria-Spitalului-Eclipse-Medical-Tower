@@ -7,7 +7,7 @@ import { dirname, extname, resolve, sep } from "node:path";
 import { createAccessCodeRequest, createRedeemRequest } from "./lib/access.mjs";
 import { accessForOAuth, accessForPendingSession } from "./lib/access-policy.mjs";
 import { parseWholeDollars } from "./lib/money.mjs";
-import { isDirector, normalizeRole, rankForRole } from "./lib/roles.mjs";
+import { isDirector, normalizeRole, rankForRole, ROLE_LABELS, ROLE_RANK } from "./lib/roles.mjs";
 import { sendBilantWebhook, sendTransactionWebhook } from "./lib/webhook.mjs";
 import {
   createAccessCode,
@@ -33,7 +33,10 @@ import {
   setSessionStage,
   setUserHr,
   upsertPendingAccessProfile,
-  updateUserRole
+  updateUserRole,
+  listCustomRoles,
+  createCustomRole,
+  deleteCustomRole
 } from "./lib/store.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
@@ -154,15 +157,19 @@ async function resolveSessionUser(session, request, sessionCookie) {
     return undefined;
   }
   const role = member?.role || "membru";
+  const customRoles = await listCustomRoles();
+  const roleMeta = customRoles.find((item) => item.code === role);
+  const callsign = /^\d{3}$/.test(role) || roleMeta ? `M-${role}` : member?.callsign || "M-";
   const isHr = isHrUser({ discordId: session.discordId, isHr: member?.isHr });
   const user = {
     discordId: session.discordId,
     displayName: member?.displayName || session.discordDisplayName,
-    callsign: member?.callsign || "M-",
+    callsign,
     role,
+    roleLabel: roleMeta?.label,
     isHr,
     isAdmin,
-    isDirector: isAdmin || isHr || isDirector(role)
+    isDirector: isAdmin || isHr || isDirector(role, customRoles)
   };
   return { stage: "authorized", user };
 }
@@ -276,7 +283,7 @@ async function handleApi(request, response, url) {
         const body = await readJson(request);
         let requestPayload;
         try {
-          requestPayload = createAccessCodeRequest(body);
+          requestPayload = createAccessCodeRequest(body, await listCustomRoles());
         } catch (error) {
           return sendJson(response, 400, { error: error.message });
         }
@@ -322,7 +329,38 @@ async function handleApi(request, response, url) {
 
       // Whitelist: listare / revocare totală (pe Discord ID)
       if (url.pathname === "/api/admin/access" && request.method === "GET") {
-        return sendJson(response, 200, { users: await loadAccessList() });
+        const customRoles = await listCustomRoles();
+        const roles = { ...Object.fromEntries(Object.entries(ROLE_LABELS).map(([code, label]) => [code, { code, label, rank: ROLE_RANK[code] }])) };
+        for (const role of customRoles) roles[role.code] = role;
+        return sendJson(response, 200, { users: await loadAccessList(), roles: Object.values(roles) });
+      }
+      if (url.pathname === "/api/admin/roles" && request.method === "POST") {
+        if (!user.isHr && !user.isAdmin) return sendJson(response, 403, { error: "Doar șeful HR poate modifica gradele și rangurile." });
+        const body = await readJson(request);
+        const code = typeof body?.code === "string" ? body.code.trim() : "";
+        const label = typeof body?.label === "string" ? body.label.trim() : "";
+        const rank = Number(body?.rank);
+        const customRoles = await listCustomRoles();
+        if (!/^\d{3}$/.test(code) || code === "000" || !label || label.length > 60 || !Number.isInteger(rank) || rank < 1 || rank > 999) {
+          return sendJson(response, 400, { error: "Codul trebuie să aibă 3 cifre (nu 000), denumirea 1–60 caractere, iar ordinea un număr între 1 și 999." });
+        }
+        if (ROLE_RANK[code] !== undefined) return sendJson(response, 409, { error: "Codul aparține unui grad standard și nu poate fi suprascris." });
+        if (customRoles.some((entry) => entry.rank === rank)) return sendJson(response, 409, { error: "Ordinea trebuie să fie unică. Alege alt număr." });
+        try {
+          await createCustomRole({ code, label, rank });
+          return sendJson(response, 201, { ok: true });
+        } catch (error) {
+          if (error.code === "23505") return sendJson(response, 409, { error: "Acest cod de grad există deja." });
+          throw error;
+        }
+      }
+      if (url.pathname === "/api/admin/roles" && request.method === "DELETE") {
+        if (!user.isHr && !user.isAdmin) return sendJson(response, 403, { error: "Doar șeful HR poate modifica gradele și rangurile." });
+        const body = await readJson(request);
+        const code = typeof body?.code === "string" ? body.code.trim() : "";
+        const deleted = await deleteCustomRole(code);
+        if (!deleted) return sendJson(response, 404, { error: "Gradul nu există sau este standard." });
+        return sendJson(response, 200, { ok: true });
       }
       if (url.pathname === "/api/admin/access" && request.method === "DELETE") {
         const body = await readJson(request);
@@ -344,14 +382,18 @@ async function handleApi(request, response, url) {
         }
         const body = await readJson(request);
         const discordId = typeof body?.discordId === "string" ? body.discordId.trim() : "";
-        const role = normalizeRole(body?.role);
+        const customRoles = await listCustomRoles();
+        const role = normalizeRole(body?.role, customRoles);
         if (!/^\d{17,20}$/.test(discordId)) {
           return sendJson(response, 400, { error: "ID Discord invalid." });
+        }
+        if (role !== "membru" && ROLE_RANK[role] === undefined && !customRoles.some((entry) => entry.code === role)) {
+          return sendJson(response, 400, { error: "Gradul selectat nu există." });
         }
         if ((await loadAccessList()).some((entry) => entry.discordId === discordId && entry.pendingCode)) {
           return sendJson(response, 409, { error: "Persoana trebuie să-și activeze codul înainte de schimbarea rolului." });
         }
-        const updated = await updateUserRole(discordId, role);
+        const updated = await updateUserRole(discordId, role, customRoles);
         if (!updated) return sendJson(response, 404, { error: "Persoana nu există în whitelist." });
         return sendJson(response, 200, { ok: true, role });
       }

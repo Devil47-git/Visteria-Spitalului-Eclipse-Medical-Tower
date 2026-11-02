@@ -73,14 +73,16 @@ function renderBilant(bilant) {
   }
 }
 
-function memberRow({ discordId, displayName, callsign, role, isHr, pendingCode }, currentUser, onChanged) {
+function memberRow({ discordId, displayName, callsign, role, roleLabel, isHr, pendingCode }, currentUser, onChanged, roles) {
   const row = document.createElement("div");
   row.className = "member-row whitelist-row";
   const left = document.createElement("div");
   left.title = discordId;
   const name = document.createElement("div");
-  const roleLabels = { "001": "Director General", "002": "Director adjunct", "003": "Director adjunct", "004": "Director adjunct", "005": "Medic Inspector", "006": "Medic Inspector", "007": "Medic Inspector", "008": "Medic Inspector", "009": "Medic Chirurg", "010": "Medic Chirurg", "011": "Medic Chirurg", "012": "Medic Chirurg" };
-  name.textContent = `${displayName} · ${callsign} · ${roleLabels[role] ? `${role} — ${roleLabels[role]}` : "Membru"}${pendingCode ? " · COD ÎN AȘTEPTARE" : ""}`;
+  const selectedRole = roles.find((item) => item.code === role);
+  const displayedCallsign = /^\d{3}$/.test(role) || selectedRole && role !== "membru" ? `M-${role}` : callsign;
+  const displayedRole = role === "membru" ? "Retired" : selectedRole?.label || roleLabel || `${role} — Grad eliminat`;
+  name.textContent = `${displayName} · ${displayedCallsign} · ${displayedRole}${pendingCode ? " · COD ÎN AȘTEPTARE" : ""}`;
   if (pendingCode) name.classList.add("pending-access");
   const id = document.createElement("div");
   id.className = "member-id";
@@ -99,14 +101,20 @@ function memberRow({ discordId, displayName, callsign, role, isHr, pendingCode }
   const isChief = currentUser.isHr || currentUser.isAdmin || currentUser.role === "001";
   const roleSelect = document.createElement("select");
   roleSelect.className = "role-select";
-  const roles = ["membru", ...Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(3, "0"))];
-  const labels = { "001": "001 — Director General", "002": "002 — Director adjunct", "003": "003 — Director adjunct", "004": "004 — Director adjunct", "005": "005 — Medic Inspector", "006": "006 — Medic Inspector", "007": "007 — Medic Inspector", "008": "008 — Medic Inspector", "009": "009 — Medic Chirurg", "010": "010 — Medic Chirurg", "011": "011 — Medic Chirurg", "012": "012 — Medic Chirurg" };
-  for (const r of roles) {
+  for (const item of roles) {
     const option = document.createElement("option");
-    option.value = r;
-    option.textContent = labels[r] || "Membru";
-    option.selected = r === role;
+    option.value = item.code;
+    option.textContent = item.label;
+    option.selected = item.code === role;
     roleSelect.append(option);
+  }
+  if (role && !roles.some((item) => item.code === role)) {
+    const legacyOption = document.createElement("option");
+    legacyOption.value = role;
+    legacyOption.textContent = `${role} — Grad eliminat`;
+    legacyOption.selected = true;
+    legacyOption.disabled = true;
+    roleSelect.append(legacyOption);
   }
   if (pendingCode || (!currentUser.isHr && !currentUser.isAdmin)) {
     for (const option of roleSelect.options) {
@@ -169,13 +177,46 @@ async function loadAdminPanel(user) {
   const panel = document.querySelector("#admin-panel");
   panel.hidden = false;
   const refresh = async () => {
-    const [{ users: accessEntries }, { codes }, { bilants }] = await Promise.all([api("/api/admin/access"), api("/api/admin/codes"), api("/api/admin/bilants/saved")]);
-    const users = sortAccessEntriesByCallsign([...new Map(accessEntries.map((entry) => [entry.discordId, entry])).values()]);
+    const [{ users: accessEntries, roles: serverRoles }, { codes }, { bilants }] = await Promise.all([api("/api/admin/access"), api("/api/admin/codes"), api("/api/admin/bilants/saved")]);
+    const roles = [{ code: "membru", label: "Retired", rank: 999 }, ...serverRoles].sort((a, b) => a.rank - b.rank || a.code.localeCompare(b.code));
+    const roleSelect = document.querySelector("#code-role");
+    roleSelect.replaceChildren(...roles.map(({ code, label }) => {
+      const option = document.createElement("option");
+      option.value = code;
+      option.textContent = label;
+      return option;
+    }));
+    const users = sortAccessEntriesByCallsign([...new Map(accessEntries.map((entry) => [entry.discordId, entry])).values()], roles);
 
     const members = document.querySelector("#member-list");
     members.replaceChildren();
     document.querySelector("#members-empty").hidden = users.length > 0;
-    for (const member of users) members.append(memberRow(member, user, refresh));
+    for (const member of users) members.append(memberRow(member, user, refresh, roles));
+
+    const roleList = document.querySelector("#role-list");
+    roleList.replaceChildren();
+    for (const role of serverRoles.filter((item) => !["membru", ...Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(3, "0"))].includes(item.code))) {
+      const row = document.createElement("div");
+      row.className = "member-row";
+      const text = document.createElement("span");
+      text.textContent = `${role.code} — ${role.label} · ordine ${role.rank}`;
+      const remove = document.createElement("button");
+      remove.className = "btn btn-small btn-danger";
+      remove.type = "button";
+      remove.textContent = "Șterge";
+      remove.disabled = !user.isHr && !user.isAdmin;
+      remove.addEventListener("click", async () => {
+        if (!window.confirm(`Ștergi gradul ${role.code} — ${role.label}? Membrii cu acest grad vor avea nevoie să fie reasignați.`)) return;
+        try {
+          await api("/api/admin/roles", { method: "DELETE", body: JSON.stringify({ code: role.code }) });
+          showToast("Gradul a fost șters.");
+          refresh();
+        } catch (error) { showToast(error.message, true); }
+      });
+      row.append(text, remove);
+      roleList.append(row);
+    }
+    document.querySelector("#role-form").hidden = !user.isHr && !user.isAdmin;
 
     const savedBilants = document.querySelector("#saved-bilants");
     savedBilants.replaceChildren();
@@ -273,10 +314,10 @@ async function loadDashboard() {
     if (!liveRefreshTimer) liveRefreshTimer = setInterval(() => {
       if (currentUser && !document.hidden) refreshLedger();
     }, 5000);
-    const roleTitles = { "001": "Director General", "002": "Director adjunct", "003": "Director adjunct", "004": "Director adjunct", "005": "Medic Inspector", "006": "Medic Inspector", "007": "Medic Inspector", "008": "Medic Inspector", "009": "Medic Chirurg", "010": "Medic Chirurg", "011": "Medic Chirurg", "012": "Medic Chirurg" };
     const identity = document.querySelector("#user-identity");
-    const roleText = roleTitles[user.role] || "Membru";
-    identity.textContent = `${user.displayName} · ${user.callsign} · ${roleText}`;
+    const roleText = user.roleLabel || (user.role === "membru" ? "Retired" : user.role);
+    const callsign = /^\d{3}$/.test(user.role) || user.roleLabel ? `M-${user.role}` : user.callsign;
+    identity.textContent = `${user.displayName} · ${callsign} · ${roleText}`;
     identity.title = identity.textContent;
     document.querySelector("#settings-open").hidden = !user.isDirector;
     document.querySelector("#bilant-action-row").hidden = !user.isDirector;
@@ -460,6 +501,23 @@ document.querySelector("#code-form").addEventListener("submit", async (event) =>
   } finally {
     button.disabled = false;
   }
+});
+
+document.querySelector("#role-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = event.currentTarget.querySelector("button[type=submit]");
+  button.disabled = true;
+  try {
+    await api("/api/admin/roles", { method: "POST", body: JSON.stringify({
+      code: document.querySelector("#role-code").value,
+      label: document.querySelector("#role-label").value,
+      rank: document.querySelector("#role-rank").value
+    }) });
+    event.currentTarget.reset();
+    showToast("Gradul a fost adăugat.");
+    await loadAdminPanel(currentUser);
+  } catch (error) { showToast(error.message, true); }
+  finally { button.disabled = false; }
 });
 
 document.querySelector("#code-copy").addEventListener("click", () => {

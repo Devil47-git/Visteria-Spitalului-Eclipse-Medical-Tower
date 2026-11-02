@@ -114,13 +114,7 @@
               placeholder="Discord ID (17-20 cifre)" required>
             <input id="code-display-name" maxlength="80" placeholder="Nume afișat" required>
             <div class="callsign-input"><span>M-</span><input id="code-callsign" inputmode="numeric" pattern="[0-9]{3}" minlength="3" maxlength="3" placeholder="007" required></div>
-            <select id="code-role">
-              <option value="membru">Membru</option>
-              <option value="001">001 — Director General</option>
-              <option value="002">002 — Director adjunct</option><option value="003">003 — Director adjunct</option><option value="004">004 — Director adjunct</option>
-              <option value="005">005 — Medic Inspector</option><option value="006">006 — Medic Inspector</option><option value="007">007 — Medic Inspector</option><option value="008">008 — Medic Inspector</option>
-              <option value="009">009 — Medic Chirurg</option><option value="010">010 — Medic Chirurg</option><option value="011">011 — Medic Chirurg</option><option value="012">012 — Medic Chirurg</option>
-            </select>
+            <select id="code-role"></select>
             <label class="checkbox-row"><input id="code-is-hr" type="checkbox"> Funcția separată: Șef HR</label>
             <button class="btn btn-primary" type="submit">Generează cod</button>
           </form>
@@ -137,6 +131,18 @@
             <input id="balance-amount-input" type="number" min="1" step="1" placeholder="Sold în $" required>
             <button class="btn btn-primary" type="submit">Setează sold</button>
           </form>
+        </div>
+
+        <div class="card admin-card">
+          <h3>Grade și funcții whitelist</h3>
+          <p class="muted small">Adaugă grade/funcții personalizate sau elimină opțiunile care nu mai sunt folosite. Gradele se afișează în ordinea ierarhică.</p>
+          <form id="role-form" class="inline-form">
+            <input id="role-code" maxlength="3" placeholder="Cod (ex. 013)" required>
+            <input id="role-label" maxlength="60" placeholder="Denumire (ex. Medic rezident)" required>
+            <input id="role-rank" type="number" min="1" max="999" placeholder="Ordine" required>
+            <button class="btn btn-primary" type="submit">Adaugă grad</button>
+          </form>
+          <div id="role-list" class="members"></div>
         </div>
 
         <div class="card admin-card">
