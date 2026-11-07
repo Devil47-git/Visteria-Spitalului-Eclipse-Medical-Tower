@@ -10,9 +10,11 @@ function showToast(message, isError = false) {
   const toast = document.querySelector("#toast");
   toast.textContent = message;
   toast.classList.toggle("error", isError);
-  toast.hidden = false;
+  if (!toast.open) toast.show();
   clearTimeout(toastTimeout);
-  toastTimeout = setTimeout(() => { toast.hidden = true; }, 4200);
+  toastTimeout = setTimeout(() => {
+    if (toast.open) toast.close();
+  }, 4200);
 }
 
 async function api(path, options = {}) {
