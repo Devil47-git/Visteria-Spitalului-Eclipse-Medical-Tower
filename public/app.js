@@ -10,10 +10,10 @@ function showToast(message, isError = false) {
   const toast = document.querySelector("#toast");
   toast.textContent = message;
   toast.classList.toggle("error", isError);
-  if (!toast.open) toast.show();
+  if (!toast.matches(":popover-open")) toast.showPopover();
   clearTimeout(toastTimeout);
   toastTimeout = setTimeout(() => {
-    if (toast.open) toast.close();
+    if (toast.matches(":popover-open")) toast.hidePopover();
   }, 4200);
 }
 

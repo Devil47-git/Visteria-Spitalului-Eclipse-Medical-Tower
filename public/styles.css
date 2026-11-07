@@ -355,6 +355,7 @@ form {
 .toast {
   position: fixed;
   margin: 0;
+  inset: auto;
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
@@ -364,7 +365,9 @@ form {
   padding: 10px 20px;
   border-radius: 10px;
   max-width: 90vw;
+  width: max-content;
   z-index: 10;
+  pointer-events: none;
 }
 
 .toast.error {
